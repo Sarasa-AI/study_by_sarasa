@@ -18,7 +18,7 @@ import {
   mediaTypeValues,
   toCaseFormValues,
 } from "@/lib/case-schema";
-import { createCaseAction, updateCaseAction } from "@/lib/case-service";
+import { createCaseAction, updateCaseAction } from "@/app/actions/case-actions";
 
 type Category = {
   id: string;
