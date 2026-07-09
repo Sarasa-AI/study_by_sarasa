@@ -1,0 +1,75 @@
+import Image from "next/image";
+import { prisma } from "@/lib/prisma";
+import { Button } from "@/components/ui/Button";
+import { Card, CardContent, CardHeader } from "@/components/ui/Card";
+import Link from "next/link";
+
+export default async function CasePage({ params }: { params: { id: string } }) {
+  const kase = await prisma.case.findUnique({
+    where: { id: params.id },
+    include: { questions: { orderBy: { orderIndex: "asc" } } },
+  });
+  if (!kase) {
+    return <div>کیس یافت نشد</div>;
+  }
+  const patient = JSON.parse(kase.patientInfo || "{}");
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold">{kase.title}</h1>
+            <Link href={`/case/${kase.id}/quiz`}>
+              <Button>آزمون</Button>
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <div className="text-sm text-slate-600">مشخصات بیمار</div>
+              <div className="text-sm">
+                سن: {patient.age} | جنس: {patient.gender} | CC: {kase.chiefComplaint}
+              </div>
+            </div>
+            {kase.mediaUrl ? (
+              <div className="relative h-64 w-full overflow-hidden rounded-xl border">
+                <Image src={kase.mediaUrl} alt="media" fill className="object-cover" />
+              </div>
+            ) : null}
+          </div>
+          <div>
+            <h3 className="mb-2 font-semibold">علائم</h3>
+            <ul className="list-inside list-disc text-sm">
+              {kase.symptoms.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h3 className="mb-2 font-semibold">تشخیص افتراقی</h3>
+            <ul className="list-inside list-disc text-sm">
+              {kase.differentialDiagnosis.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h3 className="mb-2 font-semibold">مدیریت اورژانسی</h3>
+            <p className="whitespace-pre-line text-sm">{kase.management}</p>
+          </div>
+          {kase.teachingPoints.length > 0 ? (
+            <div>
+              <h3 className="mb-2 font-semibold">نکات آموزشی</h3>
+              <ul className="list-inside list-disc text-sm">
+                {kase.teachingPoints.map((point, i) => (
+                  <li key={i}>{point}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

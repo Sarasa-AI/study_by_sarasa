@@ -1,0 +1,124 @@
+// datasource and generator
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Enums
+enum Role {
+  STUDENT
+  INSTRUCTOR
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  AUDIO
+}
+
+enum ProgressStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum CaseStatus {
+  DRAFT
+  PUBLISHED
+}
+
+// Models
+model User {
+  id                  String        @id @default(cuid())
+  name                String
+  studentCode         String?       @unique
+  role                Role          @default(STUDENT)
+  createdAt           DateTime      @default(now())
+  totalXp             Int           @default(0)
+  currentStreak       Int           @default(0)
+  longestStreak       Int           @default(0)
+  lastQuizCompletedAt DateTime?
+  progress            UserProgress[]
+  quizResults         QuizResult[]
+  instructedCases     Case[]        @relation("InstructorCases")
+}
+
+model Category {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+  icon        String?
+  orderIndex  Int     @default(0)
+  cases       Case[]
+}
+
+model Case {
+  id                    String         @id @default(cuid())
+  title                 String
+  categoryId            String
+  instructorId          String
+  chiefComplaint        String
+  patientInfo           String
+  symptoms              String[]
+  diagnosis             String
+  differentialDiagnosis String[]
+  management            String
+  teachingPoints        String[]
+  status                CaseStatus     @default(DRAFT)
+  mediaUrl              String?
+  mediaType             MediaType?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  category              Category       @relation(fields: [categoryId], references: [id])
+  instructor            User           @relation("InstructorCases", fields: [instructorId], references: [id])
+  questions             Question[]
+  progress              UserProgress[]
+  quizResults           QuizResult[]
+}
+
+model Question {
+  id            String   @id @default(cuid())
+  caseId        String
+  questionText  String
+  optionA       String
+  optionB       String
+  optionC       String
+  optionD       String
+  correctAnswer String
+  explanation   String
+  orderIndex    Int      @default(0)
+  points        Int      @default(1)
+  case          Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+}
+
+model UserProgress {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  caseId      String
+  case        Case     @relation(fields: [caseId], references: [id])
+  status      ProgressStatus @default(IN_PROGRESS)
+  lastStep    Int      @default(1)
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+
+  @@unique([userId, caseId])
+}
+
+model QuizResult {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  caseId         String
+  case           Case     @relation(fields: [caseId], references: [id])
+  score          Int
+  totalQuestions Int
+  timeSpent      Int?     // seconds
+  answers        Json     // {questionId: selectedAnswer}
+  completedAt    DateTime @default(now())
+  xpAwarded      Boolean  @default(false)
+}

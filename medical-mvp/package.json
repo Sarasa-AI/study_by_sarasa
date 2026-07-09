@@ -1,0 +1,58 @@
+{
+  "name": "medical-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:seed": "tsx prisma/seed.ts",
+    "qr:generate": "tsx scripts/generate-qr.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^5.2.2",
+    "@playwright/test": "^1.59.1",
+    "@prisma/client": "^5.18.0",
+    "@types/jest": "^30.0.0",
+    "@types/supertest": "^7.2.0",
+    "clsx": "^2.1.1",
+    "jest": "^30.3.0",
+    "lucide-react": "^0.441.0",
+    "next": "^14.2.35",
+    "next-auth": "^4.24.7",
+    "playwright": "^1.59.1",
+    "qrcode": "^1.5.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-hook-form": "^7.74.0",
+    "recharts": "^3.9.1",
+    "supertest": "^7.2.2",
+    "tailwind-merge": "^2.5.2",
+    "ts-jest": "^29.4.9",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.35",
+    "postcss": "^8.4.47",
+    "prisma": "^5.18.0",
+    "tailwindcss": "^3.4.13",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  }
+}
