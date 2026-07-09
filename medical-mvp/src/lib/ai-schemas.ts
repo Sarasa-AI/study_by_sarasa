@@ -80,6 +80,13 @@ export const mentorReplySchema = z.object({
 
 export type MentorReply = z.infer<typeof mentorReplySchema>;
 
+export const weeklyDigestSchema = z.object({
+  subject: z.string().trim().min(5).max(120),
+  bodyParagraphs: z.array(z.string().trim().min(10)).min(2).max(5),
+});
+
+export type WeeklyDigestContent = z.infer<typeof weeklyDigestSchema>;
+
 export function mapAiCaseToFormValues(data: AiCaseGeneration, categoryId: string): CaseFormValues {
   return {
     title: data.title,

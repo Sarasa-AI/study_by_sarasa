@@ -34,6 +34,8 @@ export function TargetedPracticeButton({
       }
 
       router.push(`/case/${result.data.caseId}/quiz`);
+    } catch {
+      setError("خطا در تولید کیس. لطفاً دوباره تلاش کنید.");
     } finally {
       setIsGenerating(false);
     }

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { answerOptions } from "@/lib/case-schema";
-import { prisma } from "@/lib/prisma";
 
 export type AnswerMap = Record<string, string>;
 
@@ -19,6 +18,12 @@ export type QuestionFeedback = {
   explanation: string | null;
 };
 
+export type GamificationSummary = {
+  xpEarned: number;
+  newStreak: number;
+  streakMaintained: boolean;
+};
+
 export type QuizResultData = {
   resultId: string;
   score: number;
@@ -28,12 +33,7 @@ export type QuizResultData = {
   xp: XpResult;
   streak: StreakResult;
   isNewStreakMilestone: boolean;
-};
-
-export type QuizAttemptInput = {
-  correctCount: number;
-  completionTimeSeconds: number | null;
-  currentStreak: number;
+  gamification: GamificationSummary;
 };
 
 export type XpResult = {
@@ -60,23 +60,6 @@ export type QuizActionResult = {
   success: boolean;
   message: string;
   data?: QuizResultData;
-};
-
-export type CategoryPerformance = {
-  categoryId: string;
-  categoryName: string;
-  categorySlug: string;
-  averageScore: number;
-  attempts: number;
-};
-
-export type PerformanceData = {
-  totalCasesCompleted: number;
-  averageScore: number;
-  totalXp: number;
-  currentStreak: number;
-  categoryScores: CategoryPerformance[];
-  weakAreas: CategoryPerformance[];
 };
 
 type GradingQuestion = {
@@ -169,119 +152,4 @@ export function validateQuizAnswers(questionIds: string[], answers: AnswerMap) {
   }
 
   return buildQuizAnswersSchema(questionIds).parse(answers);
-}
-
-export function calculateQuizXp(attempt: QuizAttemptInput): XpResult {
-  const basePoints = attempt.correctCount * 10;
-  const speedBonus =
-    attempt.completionTimeSeconds !== null && attempt.completionTimeSeconds <= 300 ? 20 : 0;
-  const streakBonus = attempt.currentStreak >= 3 ? 50 : 0;
-  return {
-    basePoints,
-    speedBonus,
-    streakBonus,
-    total: basePoints + speedBonus + streakBonus,
-  };
-}
-
-function utcDayKey(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-function utcDayDiff(later: Date, earlier: Date): number {
-  const laterMs = Date.parse(`${utcDayKey(later)}T00:00:00.000Z`);
-  const earlierMs = Date.parse(`${utcDayKey(earlier)}T00:00:00.000Z`);
-  return Math.round((laterMs - earlierMs) / (24 * 60 * 60 * 1000));
-}
-
-export function calculateStreak(
-  lastCompletedAt: Date | null,
-  now: Date,
-  currentStreak: number,
-): StreakResult {
-  if (!lastCompletedAt) {
-    return { newStreak: 1, streakBroken: false, isNewMilestone: false };
-  }
-
-  const hoursSince = (now.getTime() - lastCompletedAt.getTime()) / (1000 * 60 * 60);
-  if (hoursSince > 48) {
-    return { newStreak: 1, streakBroken: true, isNewMilestone: false };
-  }
-
-  const dayDiff = utcDayDiff(now, lastCompletedAt);
-  if (dayDiff === 0) {
-    return { newStreak: currentStreak, streakBroken: false, isNewMilestone: false };
-  }
-  if (dayDiff === 1) {
-    const newStreak = currentStreak + 1;
-    return { newStreak, streakBroken: false, isNewMilestone: newStreak === 3 };
-  }
-
-  return { newStreak: 1, streakBroken: true, isNewMilestone: false };
-}
-
-function toPercent(score: number, total: number): number {
-  return total > 0 ? Math.round((score / total) * 100) : 0;
-}
-
-export async function getStudentPerformance(userId: string): Promise<PerformanceData> {
-  const [user, results] = await Promise.all([
-    prisma.user.findUniqueOrThrow({
-      where: { id: userId },
-      select: { totalXp: true, currentStreak: true },
-    }),
-    prisma.quizResult.findMany({
-    where: { userId },
-    select: {
-      score: true,
-      totalQuestions: true,
-      completedAt: true,
-      case: {
-        select: {
-          category: {
-            select: { id: true, name: true, slug: true },
-          },
-        },
-      },
-    },
-    orderBy: { completedAt: "desc" },
-    }),
-  ]);
-
-  const totalCasesCompleted = results.length;
-  const averageScore =
-    totalCasesCompleted > 0
-      ? Math.round(
-          results.reduce((sum, r) => sum + toPercent(r.score, r.totalQuestions), 0) / totalCasesCompleted,
-        )
-      : 0;
-
-  const categoryMap = new Map<string, { name: string; slug: string; scores: number[] }>();
-  for (const result of results) {
-    const { category } = result.case;
-    const entry = categoryMap.get(category.id) ?? { name: category.name, slug: category.slug, scores: [] };
-    entry.scores.push(toPercent(result.score, result.totalQuestions));
-    categoryMap.set(category.id, entry);
-  }
-
-  const categoryScores: CategoryPerformance[] = [...categoryMap.entries()]
-    .map(([categoryId, { name, slug, scores }]) => ({
-      categoryId,
-      categoryName: name,
-      categorySlug: slug,
-      averageScore: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
-      attempts: scores.length,
-    }))
-    .sort((a, b) => a.categoryName.localeCompare(b.categoryName, "fa"));
-
-  const weakAreas = categoryScores.filter((c) => c.averageScore < 60);
-
-  return {
-    totalCasesCompleted,
-    averageScore,
-    totalXp: user.totalXp,
-    currentStreak: user.currentStreak,
-    categoryScores,
-    weakAreas,
-  };
 }

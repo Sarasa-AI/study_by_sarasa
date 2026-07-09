@@ -10,7 +10,8 @@ import {
   normalizeAiCaseGeneration,
   type AiCaseGeneration,
 } from "@/lib/ai-schemas";
-import { AIGatewayError, AIValidationError, generateStructuredData } from "@/lib/ai";
+import { generateStructuredData } from "@/lib/ai";
+import { mapAiErrorToClientMessage } from "@/lib/ai-errors";
 import { isCategoryWeakForUser } from "@/lib/analytics-service";
 import {
   type CaseActionResult,
@@ -21,6 +22,7 @@ import {
 } from "@/lib/case-schema";
 import { createCase, serializeCase } from "@/lib/case-service";
 import { prisma } from "@/lib/prisma";
+import { runWithRequestId } from "@/lib/request-context";
 
 export type CaseGenerationResult = CaseActionResult & {
   data?: {
@@ -52,18 +54,6 @@ async function resolveSystemInstructorId(): Promise<string | null> {
 }
 
 function handleGenerationError(error: unknown): CaseGenerationResult {
-  if (error instanceof AIValidationError) {
-    return { success: false, message: "خروجی هوش مصنوعی با ساختار مورد انتظار مطابقت ندارد" };
-  }
-  if (error instanceof AIGatewayError) {
-    const messages: Record<string, string> = {
-      RATE_LIMIT: "محدودیت درخواست هوش مصنوعی؛ لطفاً کمی بعد تلاش کنید",
-      NETWORK_ERROR: "خطا در اتصال به سرویس هوش مصنوعی",
-      PARSE_ERROR: "پاسخ هوش مصنوعی قابل پردازش نبود",
-      API_ERROR: "خطا در سرویس هوش مصنوعی",
-    };
-    return { success: false, message: messages[error.code] ?? "خطای هوش مصنوعی" };
-  }
   if (error instanceof z.ZodError) {
     return { success: false, message: formatZodError(error as ZodError) };
   }
@@ -73,6 +63,12 @@ function handleGenerationError(error: unknown): CaseGenerationResult {
     }
     return { success: false, message: "خطا در ذخیره‌سازی داده" };
   }
+
+  const aiMessage = mapAiErrorToClientMessage(error);
+  if (aiMessage !== "خطای سرور") {
+    return { success: false, message: aiMessage };
+  }
+
   return { success: false, message: "خطای سرور" };
 }
 
@@ -160,76 +156,79 @@ export async function generateClinicalCaseAction(
   isRemedial = false,
   persist = false,
 ): Promise<CaseGenerationResult> {
-  const sessionUser = await resolveSessionUser();
-  if (!sessionUser) {
-    return { success: false, message: "برای تولید کیس باید وارد شوید" };
-  }
+  return runWithRequestId(async () => {
+    const sessionUser = await resolveSessionUser();
+    if (!sessionUser) {
+      return { success: false, message: "برای تولید کیس باید وارد شوید" };
+    }
 
-  if (!isRemedial && sessionUser.role !== Role.INSTRUCTOR) {
-    return { success: false, message: "فقط استادان می‌توانند کیس تولید کنند" };
-  }
+    if (!isRemedial && sessionUser.role !== Role.INSTRUCTOR) {
+      return { success: false, message: "فقط استادان می‌توانند کیس تولید کنند" };
+    }
 
-  const trimmedCategoryId = categoryId?.trim();
-  if (!trimmedCategoryId) {
-    return { success: false, message: "دسته‌بندی الزامی است" };
-  }
+    const trimmedCategoryId = categoryId?.trim();
+    if (!trimmedCategoryId) {
+      return { success: false, message: "دسته‌بندی الزامی است" };
+    }
 
-  const shouldPersist = isRemedial || persist;
+    const shouldPersist = isRemedial || persist;
 
-  try {
-    if (isRemedial) {
-      const isWeak = await isCategoryWeakForUser(sessionUser.id, trimmedCategoryId);
-      if (!isWeak) {
-        return { success: false, message: "این دسته‌بندی در لیست نقاط ضعف شما نیست" };
+    try {
+      if (isRemedial) {
+        const isWeak = await isCategoryWeakForUser(sessionUser.id, trimmedCategoryId);
+        if (!isWeak) {
+          return { success: false, message: "این دسته‌بندی در لیست نقاط ضعف شما نیست" };
+        }
       }
-    }
 
-    const category = await prisma.category.findUnique({
-      where: { id: trimmedCategoryId },
-      select: { id: true, name: true },
-    });
-    if (!category) {
-      return { success: false, message: "دسته‌بندی یافت نشد" };
-    }
-
-    let caseOwnerId: string | null = null;
-    if (shouldPersist) {
-      caseOwnerId = isRemedial
-        ? await resolveSystemInstructorId()
-        : sessionUser.id;
-      if (!caseOwnerId) {
-        return { success: false, message: "حساب استاد سیستمی برای ذخیره کیس یافت نشد" };
+      const category = await prisma.category.findUnique({
+        where: { id: trimmedCategoryId },
+        select: { id: true, name: true },
+      });
+      if (!category) {
+        return { success: false, message: "دسته‌بندی یافت نشد" };
       }
-    }
 
-    const aiData = normalizeAiCaseGeneration(
-      (await generateStructuredData({
-        schema: aiCaseGenerationSchema,
-        systemInstruction: buildSystemInstruction(isRemedial),
-        prompt: buildClinicalPrompt(category.name, topic, isRemedial),
-      })) as z.infer<typeof aiCaseGenerationSchema>,
-    );
+      let caseOwnerId: string | null = null;
+      if (shouldPersist) {
+        caseOwnerId = isRemedial
+          ? await resolveSystemInstructorId()
+          : sessionUser.id;
+        if (!caseOwnerId) {
+          return { success: false, message: "حساب استاد سیستمی برای ذخیره کیس یافت نشد" };
+        }
+      }
 
-    const formValues = mapAiCaseToFormValues(aiData, category.id);
+      const aiData = normalizeAiCaseGeneration(
+        (await generateStructuredData({
+          operation: "case-generation",
+          schema: aiCaseGenerationSchema,
+          systemInstruction: buildSystemInstruction(isRemedial),
+          prompt: buildClinicalPrompt(category.name, topic, isRemedial),
+        })) as z.infer<typeof aiCaseGenerationSchema>,
+      );
 
-    if (!shouldPersist) {
+      const formValues = mapAiCaseToFormValues(aiData, category.id);
+
+      if (!shouldPersist) {
+        return {
+          success: true,
+          message: "کیس با موفقیت تولید شد؛ پیش از ذخیره بررسی کنید",
+          data: { formValues },
+        };
+      }
+
+      const status: CaseStatusValue = isRemedial ? "PUBLISHED" : "DRAFT";
+      const payload = toCasePayload(aiData, category.id, caseOwnerId!, status);
+      const created = await prisma.$transaction((tx) => createCase(tx, payload));
+
       return {
         success: true,
-        message: "کیس با موفقیت تولید شد؛ پیش از ذخیره بررسی کنید",
-        data: { formValues },
+        message: isRemedial ? "کیس تمرین هدفمند آماده شد" : "کیس به‌صورت پیش‌نویس ذخیره شد",
+        data: { case: serializeCase(created), formValues, caseId: created.id },
       };
+    } catch (error) {
+      return handleGenerationError(error);
     }
-
-    const status: CaseStatusValue = isRemedial ? "PUBLISHED" : "DRAFT";
-    const payload = toCasePayload(aiData, category.id, caseOwnerId!, status);
-    const created = await prisma.$transaction((tx) => createCase(tx, payload));
-
-    return {
-      success: true,
-      message: isRemedial ? "کیس تمرین هدفمند آماده شد" : "کیس به‌صورت پیش‌نویس ذخیره شد",
-      data: { case: serializeCase(created), formValues, caseId: created.id },
-    };
-  } catch (error) {
-    return handleGenerationError(error);
-  }
+  }, { operation: "case-generation" });
 }

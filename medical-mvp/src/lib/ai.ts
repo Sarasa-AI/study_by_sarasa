@@ -1,5 +1,7 @@
 import OpenAI, { APIConnectionError, APIError } from "openai";
 import { type ZodError, type ZodSchema } from "zod";
+import { getLogger } from "@/lib/logger";
+import { getRequestId } from "@/lib/request-context";
 
 export type AIGatewayErrorCode =
   | "RATE_LIMIT"
@@ -7,6 +9,8 @@ export type AIGatewayErrorCode =
   | "PARSE_ERROR"
   | "VALIDATION_ERROR"
   | "API_ERROR";
+
+export type AIGatewayOperation = "case-generation" | "mentor-reply" | "weekly-digest";
 
 const JSON_ENFORCEMENT_SUFFIX =
   "Respond with a single valid JSON object only. No markdown fences, no prose outside JSON.";
@@ -49,6 +53,7 @@ type GenerateStructuredDataParams<T> = {
   schema: ZodSchema<T>;
   systemInstruction?: string;
   model?: string;
+  operation: AIGatewayOperation;
 };
 
 function formatZodIssues(error: ZodError): string {
@@ -69,12 +74,77 @@ function mapApiError(error: APIError): AIGatewayError {
   return new AIGatewayError("API_ERROR", error.message, error);
 }
 
+function getParsedTopLevelKeys(parsed: unknown): string[] | undefined {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return undefined;
+  }
+
+  return Object.keys(parsed);
+}
+
+function logGatewaySuccess(params: {
+  operation: AIGatewayOperation;
+  model: string;
+  latencyMs: number;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+}): void {
+  getLogger().info(
+    {
+      event: "ai.gateway.success",
+      operation: params.operation,
+      model: params.model,
+      latencyMs: params.latencyMs,
+      promptTokens: params.promptTokens,
+      completionTokens: params.completionTokens,
+      totalTokens: params.totalTokens,
+      requestId: getRequestId(),
+    },
+    "AI gateway request completed",
+  );
+}
+
+function logGatewayFailure(params: {
+  operation: AIGatewayOperation;
+  model: string;
+  latencyMs: number;
+  errorCode: AIGatewayErrorCode;
+  status?: number;
+  rawModelOutput?: string;
+  zodIssues?: string;
+  parsedKeys?: string[];
+}): void {
+  getLogger().error(
+    {
+      event: "ai.gateway.failure",
+      operation: params.operation,
+      model: params.model,
+      latencyMs: params.latencyMs,
+      errorCode: params.errorCode,
+      status: params.status,
+      rawModelOutput: params.rawModelOutput,
+      zodIssues: params.zodIssues,
+      parsedKeys: params.parsedKeys,
+      requestId: getRequestId(),
+    },
+    "AI gateway request failed",
+  );
+}
+
 export async function generateStructuredData<T>(
   params: GenerateStructuredDataParams<T>,
 ): Promise<T> {
   const model = params.model ?? process.env.OPENROUTER_DEFAULT_MODEL;
   if (!model) {
-    throw new AIGatewayError("API_ERROR", "No model configured");
+    const error = new AIGatewayError("API_ERROR", "No model configured");
+    logGatewayFailure({
+      operation: params.operation,
+      model: "unknown",
+      latencyMs: 0,
+      errorCode: error.code,
+    });
+    throw error;
   }
 
   const startedAt = Date.now();
@@ -91,7 +161,52 @@ export async function generateStructuredData<T>(
 
     const latencyMs = Date.now() - startedAt;
 
-    console.info("[ai-gateway]", {
+    const content = completion.choices[0]?.message?.content;
+    if (!content?.trim()) {
+      const error = new AIGatewayError("PARSE_ERROR", "Model returned empty response");
+      logGatewayFailure({
+        operation: params.operation,
+        model,
+        latencyMs,
+        errorCode: error.code,
+      });
+      throw error;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch (parseError) {
+      const error = new AIGatewayError("PARSE_ERROR", "Failed to parse model response as JSON", parseError);
+      logGatewayFailure({
+        operation: params.operation,
+        model,
+        latencyMs,
+        errorCode: error.code,
+        rawModelOutput: content,
+      });
+      throw error;
+    }
+
+    const result = params.schema.safeParse(parsed);
+    if (!result.success) {
+      const error = new AIValidationError(
+        `Response failed schema validation: ${formatZodIssues(result.error)}`,
+        result.error,
+      );
+      logGatewayFailure({
+        operation: params.operation,
+        model,
+        latencyMs,
+        errorCode: error.code,
+        zodIssues: formatZodIssues(result.error),
+        parsedKeys: getParsedTopLevelKeys(parsed),
+      });
+      throw error;
+    }
+
+    logGatewaySuccess({
+      operation: params.operation,
       model,
       latencyMs,
       promptTokens: completion.usage?.prompt_tokens ?? null,
@@ -99,41 +214,56 @@ export async function generateStructuredData<T>(
       totalTokens: completion.usage?.total_tokens ?? null,
     });
 
-    const content = completion.choices[0]?.message?.content;
-    if (!content?.trim()) {
-      throw new AIGatewayError("PARSE_ERROR", "Model returned empty response");
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(content);
-    } catch (error) {
-      throw new AIGatewayError("PARSE_ERROR", "Failed to parse model response as JSON", error);
-    }
-
-    const result = params.schema.safeParse(parsed);
-    if (!result.success) {
-      throw new AIValidationError(
-        `Response failed schema validation: ${formatZodIssues(result.error)}`,
-        result.error,
-      );
-    }
-
     return result.data;
   } catch (error) {
+    const latencyMs = Date.now() - startedAt;
+
     if (error instanceof AIGatewayError) {
+      if (error.code !== "PARSE_ERROR" && error.code !== "VALIDATION_ERROR") {
+        logGatewayFailure({
+          operation: params.operation,
+          model,
+          latencyMs,
+          errorCode: error.code,
+        });
+      }
       throw error;
     }
+
     if (error instanceof APIConnectionError) {
-      throw new AIGatewayError("NETWORK_ERROR", "Failed to connect to OpenRouter", error);
+      const gatewayError = new AIGatewayError("NETWORK_ERROR", "Failed to connect to OpenRouter", error);
+      logGatewayFailure({
+        operation: params.operation,
+        model,
+        latencyMs,
+        errorCode: gatewayError.code,
+      });
+      throw gatewayError;
     }
+
     if (error instanceof APIError) {
-      throw mapApiError(error);
+      const gatewayError = mapApiError(error);
+      logGatewayFailure({
+        operation: params.operation,
+        model,
+        latencyMs,
+        errorCode: gatewayError.code,
+        status: error.status,
+      });
+      throw gatewayError;
     }
-    throw new AIGatewayError(
+
+    const gatewayError = new AIGatewayError(
       "API_ERROR",
       error instanceof Error ? error.message : "Unknown AI gateway error",
       error,
     );
+    logGatewayFailure({
+      operation: params.operation,
+      model,
+      latencyMs,
+      errorCode: gatewayError.code,
+    });
+    throw gatewayError;
   }
 }

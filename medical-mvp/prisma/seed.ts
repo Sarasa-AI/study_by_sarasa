@@ -323,8 +323,13 @@ async function main() {
 
   const demoStudent = await prisma.user.upsert({
     where: { studentCode: "DUMMY001" },
-    update: {},
-    create: { name: "دانشجو نمونه", role: "STUDENT", studentCode: "DUMMY001" },
+    update: { email: "demo.student@peds-morning.local" },
+    create: {
+      name: "دانشجو نمونه",
+      role: "STUDENT",
+      studentCode: "DUMMY001",
+      email: "demo.student@peds-morning.local",
+    },
   });
 
   // Create cases and questions

@@ -25,59 +25,21 @@ type QuizComponentProps = {
   onQuizContextChange?: (ctx: MentorQuizContext) => void;
 };
 
-function AnimatedXpCounter({ total }: { total: number }) {
-  const [displayed, setDisplayed] = useState(0);
+function GamificationSummaryCard({ gamification }: { gamification: QuizResultData["gamification"] }) {
+  if (gamification.xpEarned === 0) return null;
 
-  useEffect(() => {
-    if (total === 0) return;
-
-    const duration = 800;
-    const start = performance.now();
-
-    let frameId = 0;
-    const tick = (now: number) => {
-      const progress = Math.min((now - start) / duration, 1);
-      setDisplayed(Math.round(total * progress));
-      if (progress < 1) {
-        frameId = requestAnimationFrame(tick);
-      }
-    };
-
-    frameId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frameId);
-  }, [total]);
-
-  if (total === 0) return null;
+  const hasRemedialBonus = gamification.xpEarned >= 25;
 
   return (
-    <div className="rounded-xl bg-teal-50 px-4 py-3 text-teal-900">
-      <div className="text-xs font-medium text-teal-700">XP کسب‌شده</div>
-      <div
-        className="text-2xl font-bold tabular-nums transition-opacity duration-300"
-        style={{ opacity: displayed > 0 ? 1 : 0.5 }}
-      >
-        +{displayed} XP
+    <div className="min-w-0 break-words animate-pulse rounded-xl border border-amber-200 bg-gradient-to-l from-amber-50 to-teal-50 px-4 py-4 text-slate-900 [animation-iteration-count:1]">
+      <div className="text-sm font-semibold text-teal-800">خلاصه امتیازات</div>
+      <div className="mt-2 space-y-1">
+        <div className="text-xl font-bold tabular-nums sm:text-2xl">🎯 +{gamification.xpEarned} XP</div>
+        <div className="text-sm font-medium sm:text-base">🔥 استریک: {gamification.newStreak} روز</div>
+        {hasRemedialBonus ? (
+          <div className="text-sm text-amber-800">تمرین هدفمند — بونوس نقاط ضعف</div>
+        ) : null}
       </div>
-    </div>
-  );
-}
-
-function StreakMilestoneBanner({ visible }: { visible: boolean }) {
-  const [show, setShow] = useState(visible);
-
-  useEffect(() => {
-    if (!visible) return;
-    setShow(true);
-    const timer = setTimeout(() => setShow(false), 5000);
-    return () => clearTimeout(timer);
-  }, [visible]);
-
-  if (!show) return null;
-
-  return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 opacity-100 transition-opacity duration-500">
-      <div className="font-semibold">دستاورد جدید!</div>
-      <div className="text-sm">۳ روز متوالی فعالیت — بونوس استریک فعال شد!</div>
     </div>
   );
 }
@@ -98,7 +60,7 @@ function QuizResultView({
 
   return (
     <div className="space-y-4">
-      <StreakMilestoneBanner visible={result.isNewStreakMilestone} />
+      <GamificationSummaryCard gamification={result.gamification} />
 
       <Card>
         <CardHeader>
@@ -109,7 +71,6 @@ function QuizResultView({
           <div className="text-sm font-medium">
             نمره: {result.score} از {result.total} ({result.percent}%)
           </div>
-          <AnimatedXpCounter total={result.xp.total} />
           <Link href={`/quiz/result?id=${result.resultId}`} className="text-sm text-teal-700 underline">
             مشاهده نتیجه ذخیره‌شده
           </Link>

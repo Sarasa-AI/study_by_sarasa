@@ -2,10 +2,12 @@
 
 import { getServerSession } from "next-auth";
 import { mentorReplySchema } from "@/lib/ai-schemas";
-import { AIGatewayError, AIValidationError, generateStructuredData } from "@/lib/ai";
+import { generateStructuredData } from "@/lib/ai";
+import { mapAiErrorToClientMessage } from "@/lib/ai-errors";
 import { getCaseById } from "@/lib/case-service";
 import type { MentorChatMessage, MentorChatResult, MentorQuizContext } from "@/lib/mentor-types";
 import { prisma } from "@/lib/prisma";
+import { runWithRequestId } from "@/lib/request-context";
 
 const MENTOR_SYSTEM_INSTRUCTION = [
   "You are a supportive, Socratic Pediatrics Attending mentoring medical students.",
@@ -22,18 +24,11 @@ async function resolveUserId(): Promise<string | null> {
 }
 
 function handleMentorError(error: unknown): MentorChatResult {
-  if (error instanceof AIValidationError) {
-    return { success: false, message: "خروجی هوش مصنوعی با ساختار مورد انتظار مطابقت ندارد" };
+  const aiMessage = mapAiErrorToClientMessage(error);
+  if (aiMessage !== "خطای سرور") {
+    return { success: false, message: aiMessage };
   }
-  if (error instanceof AIGatewayError) {
-    const messages: Record<string, string> = {
-      RATE_LIMIT: "محدودیت درخواست هوش مصنوعی؛ لطفاً کمی بعد تلاش کنید",
-      NETWORK_ERROR: "خطا در اتصال به سرویس هوش مصنوعی",
-      PARSE_ERROR: "پاسخ هوش مصنوعی قابل پردازش نبود",
-      API_ERROR: "خطا در سرویس هوش مصنوعی",
-    };
-    return { success: false, message: messages[error.code] ?? "خطای هوش مصنوعی" };
-  }
+
   return { success: false, message: "خطای سرور" };
 }
 
@@ -148,36 +143,39 @@ export async function mentorChatAction(
   history: MentorChatMessage[],
   quizContext?: MentorQuizContext,
 ): Promise<MentorChatResult> {
-  const userId = await resolveUserId();
-  if (!userId) {
-    return { success: false, message: "برای استفاده از مربی بالینی باید وارد شوید" };
-  }
-
-  if (!history.length || history[history.length - 1]?.role !== "user") {
-    return { success: false, message: "پیام کاربر یافت نشد" };
-  }
-
-  try {
-    const kase = await getCaseById(prisma, caseId);
-    if (!kase) {
-      return { success: false, message: "کیس یافت نشد" };
+  return runWithRequestId(async () => {
+    const userId = await resolveUserId();
+    if (!userId) {
+      return { success: false, message: "برای استفاده از مربی بالینی باید وارد شوید" };
     }
 
-    const aiData = await generateStructuredData({
-      schema: mentorReplySchema,
-      systemInstruction: MENTOR_SYSTEM_INSTRUCTION,
-      prompt: buildMentorPrompt(kase, history, quizContext),
-    });
+    if (!history.length || history[history.length - 1]?.role !== "user") {
+      return { success: false, message: "پیام کاربر یافت نشد" };
+    }
 
-    return {
-      success: true,
-      message: "پاسخ دریافت شد",
-      data: {
-        reply: aiData.reply,
-        clinicalReasoning: aiData.clinicalReasoning,
-      },
-    };
-  } catch (error) {
-    return handleMentorError(error);
-  }
+    try {
+      const kase = await getCaseById(prisma, caseId);
+      if (!kase) {
+        return { success: false, message: "کیس یافت نشد" };
+      }
+
+      const aiData = await generateStructuredData({
+        operation: "mentor-reply",
+        schema: mentorReplySchema,
+        systemInstruction: MENTOR_SYSTEM_INSTRUCTION,
+        prompt: buildMentorPrompt(kase, history, quizContext),
+      });
+
+      return {
+        success: true,
+        message: "پاسخ دریافت شد",
+        data: {
+          reply: aiData.reply,
+          clinicalReasoning: aiData.clinicalReasoning,
+        },
+      };
+    } catch (error) {
+      return handleMentorError(error);
+    }
+  }, { operation: "mentor-reply" });
 }
