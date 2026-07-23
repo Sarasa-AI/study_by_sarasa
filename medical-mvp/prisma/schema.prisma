@@ -30,6 +30,26 @@ enum CaseStatus {
   PUBLISHED
 }
 
+enum AchievementCategory {
+  STREAK
+  CASES
+  FLASHCARDS
+  ACCURACY
+}
+
+enum FeedbackReason {
+  TYPO
+  WRONG_ANSWER
+  UNCLEAR_REASONING
+  OTHER
+}
+
+enum FeedbackStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
 // Models
 model User {
   id                  String        @id @default(cuid())
@@ -44,6 +64,12 @@ model User {
   lastQuizCompletedAt DateTime?
   progress            UserProgress[]
   quizResults         QuizResult[]
+  questionMistakes    QuestionMistake[]
+  flashcardProgress   UserFlashcardProgress[]
+  achievements        UserAchievement[]
+  bookmarks           UserBookmark[]
+  notes               UserNote[]
+  feedbacks           QuestionFeedback[]
   instructedCases     Case[]        @relation("InstructorCases")
 }
 
@@ -79,21 +105,61 @@ model Case {
   questions             Question[]
   progress              UserProgress[]
   quizResults           QuizResult[]
+  flashcards            Flashcard[]
+  bookmarks             UserBookmark[]
+  notes                 UserNote[]
 }
 
 model Question {
-  id            String   @id @default(cuid())
-  caseId        String
-  questionText  String
-  optionA       String
-  optionB       String
-  optionC       String
-  optionD       String
-  correctAnswer String
-  explanation   String
-  orderIndex    Int      @default(0)
-  points        Int      @default(1)
-  case          Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  id                   String   @id @default(cuid())
+  caseId               String
+  questionText         String
+  optionA              String
+  optionB              String
+  optionC              String
+  optionD              String
+  correctAnswer        String
+  explanation          String
+  clinicalReasoning    String?
+  distractorRationales Json?
+  orderIndex           Int      @default(0)
+  points               Int      @default(1)
+  case                 Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  mistakes             QuestionMistake[]
+  feedbacks            QuestionFeedback[]
+}
+
+model QuestionFeedback {
+  id         String         @id @default(cuid())
+  questionId String
+  userId     String
+  reason     FeedbackReason
+  comment    String?
+  status     FeedbackStatus @default(PENDING)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([questionId])
+  @@index([userId])
+}
+
+model QuestionMistake {
+  id         String   @id @default(cuid())
+  userId     String
+  questionId String
+  isResolved Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, questionId])
+  @@index([userId, isResolved])
 }
 
 model UserProgress {
@@ -110,6 +176,9 @@ model UserProgress {
   @@unique([userId, caseId])
 }
 
+// Partial unique index QuizResult_userId_caseId_xpAwarded_unique
+// (userId, caseId) WHERE xpAwarded = true is managed in migration
+// 20260709164000_add_quiz_xp_idempotency_index (Prisma cannot express partial indexes).
 model QuizResult {
   id             String   @id @default(cuid())
   userId         String
@@ -122,4 +191,87 @@ model QuizResult {
   answers        Json     // {questionId: selectedAnswer}
   completedAt    DateTime @default(now())
   xpAwarded      Boolean  @default(false)
+  xpEarned       Int      @default(0)
+}
+
+model Achievement {
+  id          String              @id @default(cuid())
+  code        String              @unique
+  title       String
+  description String
+  icon        String
+  category    AchievementCategory
+  threshold   Int
+  users       UserAchievement[]
+}
+
+model UserAchievement {
+  id            String      @id @default(cuid())
+  userId        String
+  achievementId String
+  unlockedAt    DateTime    @default(now())
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+}
+
+model Flashcard {
+  id        String   @id @default(cuid())
+  caseId    String?
+  frontText String
+  backText  String
+  imageUrl  String?
+  caption   String?
+  createdAt DateTime @default(now())
+
+  case     Case?                   @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  progress UserFlashcardProgress[]
+
+  @@index([caseId])
+}
+
+model UserFlashcardProgress {
+  id             String    @id @default(cuid())
+  userId         String
+  flashcardId    String
+  interval       Int       @default(1) // days
+  easeFactor     Float     @default(2.5)
+  repetitions    Int       @default(0)
+  dueDate        DateTime  @default(now())
+  lastReviewedAt DateTime?
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flashcard Flashcard @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, flashcardId])
+  @@index([userId, dueDate])
+}
+
+model UserBookmark {
+  id        String   @id @default(cuid())
+  userId    String
+  caseId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, caseId])
+  @@index([userId])
+}
+
+model UserNote {
+  id        String   @id @default(cuid())
+  userId    String
+  caseId    String
+  content   String
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, caseId])
+  @@index([userId])
 }

@@ -1,14 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { getSessionUser } from "@/lib/auth";
 import { scoreAnswers } from "@/lib/quiz";
 
 export async function POST(req: Request) {
-  const session = await getServerSession();
-  if (!session?.user || !(session.user as any).id) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const userId = (session.user as any).id as string;
+  const userId = user.id;
   const body = await req.json();
   const { caseId, answers, timeSpent } = body as { caseId: string; answers: Record<string, string>; timeSpent?: number };
   if (!caseId || !answers) return NextResponse.json({ error: "Invalid payload" }, { status: 400 });

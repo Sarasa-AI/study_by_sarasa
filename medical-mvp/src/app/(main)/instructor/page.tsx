@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { requireInstructor } from "@/lib/auth";
 import { AIGenerateCasePanel } from "@/components/instructor/AIGenerateCasePanel";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 
 export default async function InstructorPage() {
+  await requireInstructor();
+
   const categories = await prisma.category.findMany({
     orderBy: { orderIndex: "asc" },
     include: { cases: true },
@@ -14,18 +17,21 @@ export default async function InstructorPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">پنل استاد</h1>
-        <Link href="/instructor/cases/new">
-          <Button>کیس جدید</Button>
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/instructor/feedback">
+            <Button variant="secondary">گزارش‌های خطا</Button>
+          </Link>
+          <Link href="/instructor/cases/ai-generate">
+            <Button variant="secondary">تولید کیس با AI</Button>
+          </Link>
+          <Link href="/instructor/cases/new">
+            <Button>کیس جدید</Button>
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <AIGenerateCasePanel
-          categories={categories.map((category) => ({
-            id: category.id,
-            name: category.name,
-          }))}
-        />
+        <AIGenerateCasePanel />
 
         {categories.map((c) => (
           <Card key={c.id}>
@@ -37,7 +43,7 @@ export default async function InstructorPage() {
             </CardHeader>
             <CardContent>
               <div className="text-sm text-slate-600">
-                برای ویرایش دقیق کیس‌ها از «کیس جدید» یا تولید سریع بالا استفاده کنید.
+                برای ویرایش دقیق کیس‌ها از «کیس جدید» یا «تولید کیس با AI» استفاده کنید.
               </div>
             </CardContent>
           </Card>

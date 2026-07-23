@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 type HealthCheckResult = {
   ok: boolean;
   latencyMs: number;

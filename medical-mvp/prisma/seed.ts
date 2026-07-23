@@ -7,6 +7,8 @@ type SeedQuestion = {
   options: { A: string; B: string; C: string; D: string };
   correctAnswer: string;
   explanation: string;
+  clinicalReasoning?: string;
+  distractorRationales?: Partial<Record<"A" | "B" | "C" | "D", string>>;
   points: number;
   orderIndex: number;
 };
@@ -51,6 +53,8 @@ function toQuestionCreateData(q: SeedQuestion) {
     optionD: q.options.D,
     correctAnswer: q.correctAnswer,
     explanation: q.explanation,
+    clinicalReasoning: q.clinicalReasoning ?? null,
+    distractorRationales: q.distractorRationales ?? undefined,
     points: q.points,
     orderIndex: q.orderIndex,
   };
@@ -58,12 +62,121 @@ function toQuestionCreateData(q: SeedQuestion) {
 
 async function main() {
   // Clean up existing data to make seeding idempotent in dev
+  await prisma.userAchievement.deleteMany({});
+  await prisma.userFlashcardProgress.deleteMany({});
+  await prisma.flashcard.deleteMany({});
+  await prisma.questionMistake.deleteMany({});
   await prisma.quizResult.deleteMany({});
   await prisma.userProgress.deleteMany({});
   await prisma.question.deleteMany({});
   await prisma.case.deleteMany({});
   await prisma.category.deleteMany({});
   await prisma.user.deleteMany({});
+
+  const achievementDefs = [
+    {
+      code: "STREAK_3",
+      title: "استریک ۳ روزه",
+      description: "سه روز متوالی مطالعه فعال داشته باشید.",
+      icon: "🔥",
+      category: "STREAK" as const,
+      threshold: 3,
+    },
+    {
+      code: "STREAK_7",
+      title: "استریک ۷ روزه",
+      description: "یک هفته متوالی مطالعه فعال داشته باشید.",
+      icon: "⚡",
+      category: "STREAK" as const,
+      threshold: 7,
+    },
+    {
+      code: "STREAK_30",
+      title: "استریک ۳۰ روزه",
+      description: "یک ماه متوالی مطالعه فعال داشته باشید.",
+      icon: "🏆",
+      category: "STREAK" as const,
+      threshold: 30,
+    },
+    {
+      code: "CASES_1",
+      title: "اولین کیس",
+      description: "اولین کیس بالینی خود را تکمیل کنید.",
+      icon: "🩺",
+      category: "CASES" as const,
+      threshold: 1,
+    },
+    {
+      code: "CASES_10",
+      title: "۱۰ کیس تکمیل‌شده",
+      description: "ده کیس بالینی را با موفقیت به پایان برسانید.",
+      icon: "📚",
+      category: "CASES" as const,
+      threshold: 10,
+    },
+    {
+      code: "CASES_25",
+      title: "۲۵ کیس تکمیل‌شده",
+      description: "بیست‌وپنج کیس بالینی را تکمیل کنید.",
+      icon: "🎓",
+      category: "CASES" as const,
+      threshold: 25,
+    },
+    {
+      code: "FLASHCARDS_10",
+      title: "۱۰ فلش‌کارت",
+      description: "ده فلش‌کارت را حداقل یک‌بار مرور کنید.",
+      icon: "🃏",
+      category: "FLASHCARDS" as const,
+      threshold: 10,
+    },
+    {
+      code: "FLASHCARDS_50",
+      title: "۵۰ فلش‌کارت",
+      description: "پنجاه فلش‌کارت را مرور کنید.",
+      icon: "🧠",
+      category: "FLASHCARDS" as const,
+      threshold: 50,
+    },
+    {
+      code: "FLASHCARDS_100",
+      title: "۱۰۰ فلش‌کارت",
+      description: "صد فلش‌کارت را مرور کنید.",
+      icon: "💎",
+      category: "FLASHCARDS" as const,
+      threshold: 100,
+    },
+    {
+      code: "ACCURACY_80",
+      title: "دقت ۸۰٪",
+      description: "میانگین دقت کلی خود را به ۸۰٪ یا بالاتر برسانید (حداقل ۲۰ سوال).",
+      icon: "🎯",
+      category: "ACCURACY" as const,
+      threshold: 80,
+    },
+    {
+      code: "QUESTIONS_50",
+      title: "۵۰ سوال پاسخ‌داده‌شده",
+      description: "پنجاه سوال چندگزینه‌ای را پاسخ دهید.",
+      icon: "✅",
+      category: "ACCURACY" as const,
+      threshold: 50,
+    },
+  ];
+
+  for (const def of achievementDefs) {
+    await prisma.achievement.upsert({
+      where: { code: def.code },
+      update: {
+        title: def.title,
+        description: def.description,
+        icon: def.icon,
+        category: def.category,
+        threshold: def.threshold,
+      },
+      create: def,
+    });
+  }
 
   const categories = await prisma.category.createMany({
     data: [
@@ -102,6 +215,13 @@ async function main() {
           options: { A: "اکسیژن وریدی", B: "آسپیرین جویدنی", C: "نیتروگلیسیرین زیرزبانی", D: "مورفین" },
           correctAnswer: "B",
           explanation: "آسپیرین کاهش مرگ‌ومیر؛ MONA-B ترتیب.",
+          clinicalReasoning:
+            "۱) در STEMI اولویت با درمان ضدپلاکتی فوری است.\n۲) آسپیرین جویدنی جذب سریع دارد و مرگ‌ومیر را کاهش می‌دهد.\n۳) سایر اقدامات حمایتی هستند و جایگزین آسپیرین اولیه نیستند.",
+          distractorRationales: {
+            A: "اکسیژن فقط در هیپوکسی اندیکاسیون دارد و اولین اقدام حیاتی نیست.",
+            C: "نیتروگلیسیرین درد را کم می‌کند اما در افت فشار یا MI تحتانی خطرناک است و اولویت اول نیست.",
+            D: "مورفین برای درد مقاوم است و می‌تواند جذب ضدپلاکتی خوراکی را به تأخیر بیندازد.",
+          },
           points: 2,
           orderIndex: 1,
         },
@@ -110,6 +230,13 @@ async function main() {
           options: { A: "V1-V4", B: "II, III, aVF", C: "I, aVL", D: "V5-V6" },
           correctAnswer: "B",
           explanation: "الگوی MI تحتانی.",
+          clinicalReasoning:
+            "۱) تغییرات ST در لیدهای تحتانی یعنی II، III و aVF نشان‌دهنده درگیری دیواره تحتانی است.\n۲) این الگو با انسداد RCA (یا گاهی Circumflex) سازگار است.",
+          distractorRationales: {
+            A: "V1–V4 مربوط به MI قدامی (LAD) است، نه تحتانی.",
+            C: "I و aVL الگوی Lateral را نشان می‌دهند.",
+            D: "V5–V6 بیشتر Lateral/اپیکال را پوشش می‌دهند نه Inferior کلاسیک.",
+          },
           points: 1,
           orderIndex: 2,
         },
@@ -323,16 +450,51 @@ async function main() {
 
   const demoStudent = await prisma.user.upsert({
     where: { studentCode: "DUMMY001" },
-    update: { email: "demo.student@peds-morning.local" },
+    update: {
+      email: "demo.student@peds-morning.local",
+      totalXp: 120,
+      currentStreak: 5,
+      longestStreak: 8,
+    },
     create: {
       name: "دانشجو نمونه",
       role: "STUDENT",
       studentCode: "DUMMY001",
       email: "demo.student@peds-morning.local",
+      totalXp: 120,
+      currentStreak: 5,
+      longestStreak: 8,
+    },
+  });
+
+  await prisma.user.upsert({
+    where: { studentCode: "DUMMY002" },
+    update: { totalXp: 85, currentStreak: 3, longestStreak: 6 },
+    create: {
+      name: "علی رضایی",
+      role: "STUDENT",
+      studentCode: "DUMMY002",
+      totalXp: 85,
+      currentStreak: 3,
+      longestStreak: 6,
+    },
+  });
+
+  await prisma.user.upsert({
+    where: { studentCode: "DUMMY003" },
+    update: { totalXp: 200, currentStreak: 12, longestStreak: 15 },
+    create: {
+      name: "مریم حسینی",
+      role: "STUDENT",
+      studentCode: "DUMMY003",
+      totalXp: 200,
+      currentStreak: 12,
+      longestStreak: 15,
     },
   });
 
   // Create cases and questions
+  const createdCases: { id: string; title: string; mediaUrl: string | null; diagnosis: string }[] = [];
   for (const c of casesData) {
     const caseFields = toCaseFields(c);
     const created = await prisma.case.create({
@@ -356,6 +518,13 @@ async function main() {
       },
     });
 
+    createdCases.push({
+      id: created.id,
+      title: created.title,
+      mediaUrl: created.mediaUrl,
+      diagnosis: created.diagnosis,
+    });
+
     await prisma.userProgress.upsert({
       where: { userId_caseId: { userId: demoStudent.id, caseId: created.id } },
       update: { lastStep: 1, status: "IN_PROGRESS" },
@@ -363,7 +532,65 @@ async function main() {
     });
   }
 
-  console.log("Seed completed with", casesData.length, "cases.");
+  const stemi = createdCases.find((c) => c.title.includes("ST Elevation"));
+  const pe = createdCases.find((c) => c.title.toLowerCase().includes("pe") || c.diagnosis === "PE" || c.title.includes("آمبولی"));
+  const stroke = createdCases.find((c) => c.diagnosis.toLowerCase().includes("stroke") || c.title.includes("سکته"));
+  const hyperK = createdCases.find((c) => c.diagnosis.toLowerCase().includes("hyperkalemia") || c.title.includes("پتاسیم"));
+
+  await prisma.flashcard.createMany({
+    data: [
+      {
+        caseId: stemi?.id ?? null,
+        frontText: "معیار ECG برای STEMI قدامی چیست؟",
+        backText:
+          "صعود قطعه ST ≥ ۱ mm در دو لید مجاور پره‌کوردیال (V2–V4) همراه با علائم ایسکمی حاد؛ درمان فوری با فعال‌سازی Cath Lab / فیبرینولیز طبق پروتکل.",
+        imageUrl: stemi?.mediaUrl ?? "https://res.cloudinary.com/demo/image/upload/v1700000000/stemi.png",
+        caption: "الگوی ST elevation در لیدهای قدامی",
+      },
+      {
+        caseId: pe?.id ?? createdCases[1]?.id ?? null,
+        frontText: "یافته کلیدی در CTA برای تشخیص آمبولی ریه چیست؟",
+        backText:
+          "نقص پرشدگی (filling defect) داخل شریان پولمونر؛ همراه با تاکی‌کاردی، هیپوکسی و امتیاز Wells بالا احتمال PE را افزایش می‌دهد.",
+        imageUrl: pe?.mediaUrl ?? "https://res.cloudinary.com/demo/image/upload/v1700000000/pe_cta.png",
+        caption: "CTA قفسه سینه — filling defect",
+      },
+      {
+        caseId: stroke?.id ?? createdCases[2]?.id ?? null,
+        frontText: "پنجره زمانی استاندارد برای tPA در سکته ایسکمیک چیست؟",
+        backText:
+          "معمولاً تا ۴٫۵ ساعت از شروع علائم در بیماران واجد شرایط؛ CT بدون کنتراست برای رد خونریزی قبل از ترومبولیز الزامی است.",
+        imageUrl: stroke?.mediaUrl ?? "https://res.cloudinary.com/demo/image/upload/v1700000000/ct_stroke.png",
+        caption: "CT مغز بدون کنتراست",
+      },
+      {
+        caseId: hyperK?.id ?? createdCases[createdCases.length - 1]?.id ?? null,
+        frontText: "اولین اقدام اورژانسی در هیپرکالمی با تغییرات ECG چیست؟",
+        backText:
+          "پایدارسازی غشاء با کلسیم وریدی (کلسیم گلوکونات/کلراید)، سپس شیفت پتاسیم (انسولین+گلوکز، بتاآگونیست) و حذف پتاسیم.",
+        imageUrl: hyperK?.mediaUrl ?? "https://res.cloudinary.com/demo/image/upload/v1700000000/hyperkalemia_ekg.png",
+        caption: "امواج T نوک‌تیز در هیپرکالمی",
+      },
+      {
+        caseId: null,
+        frontText: "قانون ABC در ارزیابی اولیه بیمار بدحال را به یاد آورید.",
+        backText:
+          "Airway → Breathing → Circulation؛ همزمان اکسیژن، مانیتورینگ و دسترسی وریدی را برقرار کنید، سپس به علت زمینه‌ای بپردازید.",
+        imageUrl: null,
+        caption: null,
+      },
+      {
+        caseId: createdCases[4]?.id ?? null,
+        frontText: "نقش FAST در ترومای بلانت شکم چیست؟",
+        backText:
+          "شناسایی سریع مایع آزاد داخل‌صفاقی یا پریکاردیال در بیمار ناپایدار؛ مثبت بودن آن می‌تواند اندیکاسیون لاپاراتومی اورژانس باشد.",
+        imageUrl: "https://res.cloudinary.com/demo/image/upload/v1700000000/fast_exam.png",
+        caption: "نمای FAST — مایع آزاد",
+      },
+    ],
+  });
+
+  console.log("Seed completed with", casesData.length, "cases and flashcards.");
 }
 
 main()

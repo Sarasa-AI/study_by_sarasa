@@ -38,6 +38,8 @@ export const caseQuestionSchema = z.object({
     errorMap: () => ({ message: "پاسخ صحیح نامعتبر است" }),
   }),
   explanation: z.string().trim().min(1, "توضیح پاسخ الزامی است"),
+  clinicalReasoning: z.string().nullish(),
+  distractorRationales: z.record(z.enum(answerOptions), z.string()).nullish(),
 });
 
 export const casePayloadSchema = z.object({
@@ -123,6 +125,8 @@ type CaseLike = {
     optionD: string;
     correctAnswer: "A" | "B" | "C" | "D";
     explanation: string;
+    clinicalReasoning?: string | null;
+    distractorRationales?: Partial<Record<"A" | "B" | "C" | "D", string>> | null;
   }>;
 };
 
@@ -149,6 +153,8 @@ export function toCaseFormValues(kase?: CaseLike | null): CaseFormValues {
           optionD: "",
           correctAnswer: "A",
           explanation: "",
+          clinicalReasoning: null,
+          distractorRationales: null,
         },
       ],
     };
@@ -175,6 +181,8 @@ export function toCaseFormValues(kase?: CaseLike | null): CaseFormValues {
       optionD: question.optionD,
       correctAnswer: question.correctAnswer,
       explanation: question.explanation,
+      clinicalReasoning: question.clinicalReasoning ?? null,
+      distractorRationales: question.distractorRationales ?? null,
     })),
   };
 }

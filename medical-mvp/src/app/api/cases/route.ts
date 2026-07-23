@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { casePayloadSchema } from "@/lib/case-schema";
 import { createCase, listCases, serializeCase } from "@/lib/case-service";
+import { requireInstructorApi } from "@/lib/auth";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -12,14 +12,17 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const session = await getServerSession();
+  const instructor = await requireInstructorApi();
+  if (!instructor) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+  }
+
   const body = await req.json();
-  const instructorId = body.instructorId || (session?.user as { id?: string } | undefined)?.id;
 
   try {
     const payload = casePayloadSchema.parse({
       ...body,
-      instructorId,
+      instructorId: instructor.id,
     });
 
     const created = await createCase(prisma, payload);

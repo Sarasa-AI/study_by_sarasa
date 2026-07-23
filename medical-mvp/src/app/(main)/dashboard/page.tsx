@@ -1,28 +1,32 @@
 import Link from "next/link";
-import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
-import { BarChart3, Flame, Star, Target, Trophy } from "lucide-react";
+import { BarChart3, BookOpenCheck, Flame, Star, Target, Trophy } from "lucide-react";
 import { getDashboardStatsAction } from "@/app/actions/dashboard-stats";
 import { PerformanceChart } from "@/components/dashboard/PerformanceChart";
 import { TargetedPracticeButton } from "@/components/dashboard/TargetedPracticeButton";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
+import { getSessionUser } from "@/lib/auth";
+import { getPendingMistakesCount } from "@/lib/practice-service";
 
 export default async function DashboardPage() {
-  const session = await getServerSession();
-  const userId = (session?.user as { id?: string } | undefined)?.id;
+  const sessionUser = await getSessionUser();
+  const userId = sessionUser?.id;
 
   if (!userId) {
     redirect("/login");
   }
 
-  const result = await getDashboardStatsAction();
+  const [result, pendingMistakesCount] = await Promise.all([
+    getDashboardStatsAction(),
+    getPendingMistakesCount(userId),
+  ]);
   if (!result.success || !result.data) {
     redirect("/login");
   }
 
   const stats = result.data;
-  const studentName = session?.user?.name ?? "دانشجو";
+  const studentName = sessionUser?.name ?? "دانشجو";
   const averageScorePercent = Math.round(stats.overallAccuracy * 100);
 
   return (
@@ -85,6 +89,25 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {pendingMistakesCount > 0 && (
+        <Card className="border-rose-200 bg-rose-50">
+          <CardContent className="flex flex-col items-start gap-3 py-6 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <BookOpenCheck className="mt-0.5 h-5 w-5 shrink-0 text-rose-700" />
+              <div>
+                <div className="font-semibold text-rose-900">مرور اشتباهات</div>
+                <p className="mt-1 text-sm text-rose-800">
+                  {pendingMistakesCount} سوال در صف مرور شماست. با پاسخ صحیح آن‌ها را برطرف کنید.
+                </p>
+              </div>
+            </div>
+            <Link href="/practice/review">
+              <Button className="w-full sm:w-auto">شروع مرور</Button>
+            </Link>
+          </CardContent>
+        </Card>
+      )}
 
       {stats.totalCasesCompleted === 0 && (
         <Card className="border-primary/20 bg-accent">

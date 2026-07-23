@@ -1,5 +1,5 @@
- "use client";
-import { signIn } from "next-auth/react";
+"use client";
+import { getSession, signIn } from "next-auth/react";
 import { useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -9,7 +9,6 @@ import { useRouter } from "next/navigation";
 export default function LoginPage() {
   const [name, setName] = useState("");
   const [studentCode, setStudentCode] = useState("");
-  const [role, setRole] = useState<"STUDENT" | "INSTRUCTOR">("STUDENT");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
@@ -19,13 +18,14 @@ export default function LoginPage() {
     const res = await signIn("credentials", {
       name,
       studentCode,
-      role,
       redirect: false,
     });
-    setLoading(false);
     if (res?.ok) {
-      router.push("/");
+      const session = await getSession();
+      const role = session?.user?.role;
+      router.push(role === "INSTRUCTOR" ? "/instructor" : "/");
     } else {
+      setLoading(false);
       alert("ورود نامعتبر");
     }
   }
@@ -49,25 +49,6 @@ export default function LoginPage() {
                 onChange={(e) => setStudentCode(e.target.value)}
                 placeholder="مثال: 4012345"
               />
-            </div>
-            <div>
-              <label className="mb-2 block text-sm">نقش</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  className={`rounded-xl border px-3 py-2 text-sm ${role === "STUDENT" ? "border-teal-600 bg-teal-50 text-teal-700" : "border-border"}`}
-                  onClick={() => setRole("STUDENT")}
-                >
-                  دانشجو
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-xl border px-3 py-2 text-sm ${role === "INSTRUCTOR" ? "border-teal-600 bg-teal-50 text-teal-700" : "border-border"}`}
-                  onClick={() => setRole("INSTRUCTOR")}
-                >
-                  استاد
-                </button>
-              </div>
             </div>
             <Button type="submit" disabled={loading} className="w-full">
               {loading ? "در حال ورود..." : "ورود"}

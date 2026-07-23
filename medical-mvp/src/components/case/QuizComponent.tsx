@@ -6,9 +6,11 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
+import { QuestionFeedbackModal } from "@/components/case/QuestionFeedbackModal";
 import { answerOptions } from "@/lib/case-schema";
 import {
   buildQuizAnswersSchema,
+  type QuizActionResult,
   type QuizFormValues,
   type QuizQuestionView,
   type QuizResultData,
@@ -19,10 +21,12 @@ import type { MentorQuizContext } from "@/lib/mentor-types";
 const STEP_THRESHOLD = 5;
 
 type QuizComponentProps = {
-  caseId: string;
-  caseTitle: string;
+  caseId?: string;
+  caseTitle?: string;
   questions: QuizQuestionView[];
   onQuizContextChange?: (ctx: MentorQuizContext) => void;
+  submitFn?: (answers: QuizFormValues, timeSpent: number) => Promise<QuizActionResult>;
+  resultHeading?: string;
 };
 
 function GamificationSummaryCard({ gamification }: { gamification: QuizResultData["gamification"] }) {
@@ -45,11 +49,11 @@ function GamificationSummaryCard({ gamification }: { gamification: QuizResultDat
 }
 
 function QuizResultView({
-  caseTitle,
+  resultHeading,
   result,
   questions,
 }: {
-  caseTitle: string;
+  resultHeading: string;
   result: QuizResultData;
   questions: QuizQuestionView[];
 }) {
@@ -62,23 +66,36 @@ function QuizResultView({
     <div className="space-y-4">
       <GamificationSummaryCard gamification={result.gamification} />
 
+      {result.newAchievements && result.newAchievements.length > 0 ? (
+        <div className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900">
+          مدال جدید:{" "}
+          {result.newAchievements.map((a) => `${a.icon} ${a.title}`).join("، ")}
+        </div>
+      ) : null}
+
       <Card>
         <CardHeader>
           <div className="text-lg font-bold">نتیجه آزمون</div>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="text-sm">کیس: {caseTitle}</div>
+          <div className="text-sm">{resultHeading}</div>
           <div className="text-sm font-medium">
             نمره: {result.score} از {result.total} ({result.percent}%)
           </div>
-          <Link href={`/quiz/result?id=${result.resultId}`} className="text-sm text-teal-700 underline">
-            مشاهده نتیجه ذخیره‌شده
-          </Link>
+          {result.resultId ? (
+            <Link href={`/quiz/result?id=${result.resultId}`} className="text-sm text-teal-700 underline">
+              مشاهده نتیجه ذخیره‌شده
+            </Link>
+          ) : null}
         </CardContent>
       </Card>
 
       {result.feedback.map((item, index) => {
         const question = questionMap[item.questionId];
+        const distractorEntries = item.distractorRationales
+          ? (Object.entries(item.distractorRationales) as Array<[keyof NonNullable<typeof item.distractorRationales>, string]>)
+          : [];
+
         return (
           <Card key={item.questionId} className={item.isCorrect ? "border-green-200" : "border-red-200"}>
             <CardHeader>
@@ -89,17 +106,48 @@ function QuizResultView({
                 </span>
               </div>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm">
+            <CardContent className="space-y-3 text-sm">
               {question ? <div>{question.questionText}</div> : null}
-              {!item.isCorrect ? (
-                <>
-                  <div className="text-slate-600">
-                    پاسخ شما: {item.selected ?? "—"} | پاسخ صحیح: {item.correctAnswer}
-                  </div>
-                  {item.explanation ? (
-                    <div className="rounded-xl bg-muted p-3 text-slate-700">{item.explanation}</div>
-                  ) : null}
-                </>
+              <div className="text-slate-600">
+                پاسخ شما: {item.selected ?? "—"} | پاسخ صحیح: {item.correctAnswer}
+              </div>
+              {item.explanation ? (
+                <div className="rounded-xl bg-muted p-3 text-slate-700">{item.explanation}</div>
+              ) : null}
+              {item.clinicalReasoning ? (
+                <div className="rounded-xl border border-teal-200 bg-teal-50/80 p-3">
+                  <div className="mb-1.5 text-sm font-semibold text-teal-900">استدلال بالینی</div>
+                  <div className="whitespace-pre-wrap leading-7 text-slate-800">{item.clinicalReasoning}</div>
+                </div>
+              ) : null}
+              {distractorEntries.length > 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="mb-2 text-sm font-semibold text-slate-900">دلایل رد گزینه‌ها</div>
+                  <ul className="space-y-2">
+                    {distractorEntries.map(([optionKey, rationale]) => {
+                      const isSelectedWrong = !item.isCorrect && item.selected === optionKey;
+                      const optionText = question?.options[optionKey];
+                      return (
+                        <li
+                          key={optionKey}
+                          className={`rounded-lg border px-3 py-2 ${
+                            isSelectedWrong
+                              ? "border-red-200 bg-red-50 text-red-950"
+                              : "border-slate-200 bg-white text-slate-800"
+                          }`}
+                        >
+                          <div className="font-medium">
+                            {optionKey}. {optionText ?? ""}
+                            {isSelectedWrong ? (
+                              <span className="mr-2 text-xs font-normal text-red-700"> (انتخاب شما)</span>
+                            ) : null}
+                          </div>
+                          <div className="mt-1 leading-6 text-slate-700">{rationale}</div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
               ) : null}
             </CardContent>
           </Card>
@@ -123,7 +171,10 @@ function QuestionCard({
   return (
     <Card>
       <CardHeader>
-        <div className="font-semibold">سوال {index + 1}</div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="font-semibold">سوال {index + 1}</div>
+          <QuestionFeedbackModal questionId={question.id} />
+        </div>
       </CardHeader>
       <CardContent>
         <div className="mb-3">{question.questionText}</div>
@@ -148,6 +199,8 @@ export function QuizComponent({
   caseTitle,
   questions,
   onQuizContextChange,
+  submitFn,
+  resultHeading,
 }: QuizComponentProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -155,6 +208,7 @@ export function QuizComponent({
   const [result, setResult] = useState<QuizResultData | null>(null);
   const startedAtRef = useRef(Date.now());
 
+  const heading = resultHeading ?? (caseTitle ? `کیس: ${caseTitle}` : "نتیجه آزمون");
   const useStepper = questions.length > STEP_THRESHOLD;
   const schema = useMemo(
     () => buildQuizAnswersSchema(questions.map((question) => question.id)),
@@ -192,7 +246,12 @@ export function QuizComponent({
     const timeSpent = Math.round((Date.now() - startedAtRef.current) / 1000);
 
     try {
-      const actionResult = await submitQuizAction(caseId, values, timeSpent);
+      const actionResult = submitFn
+        ? await submitFn(values, timeSpent)
+        : caseId
+          ? await submitQuizAction(caseId, values, timeSpent)
+          : { success: false as const, message: "شناسه کیس مشخص نشده است" };
+
       if (!actionResult.success) {
         setServerError(actionResult.message);
         return;
@@ -204,7 +263,7 @@ export function QuizComponent({
   }
 
   if (result) {
-    return <QuizResultView caseTitle={caseTitle} result={result} questions={questions} />;
+    return <QuizResultView resultHeading={heading} result={result} questions={questions} />;
   }
 
   async function goToNextStep() {

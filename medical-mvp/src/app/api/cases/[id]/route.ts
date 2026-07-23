@@ -1,8 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import { casePayloadSchema } from "@/lib/case-schema";
 import { deleteCaseById, getCaseById, serializeCase, updateCase } from "@/lib/case-service";
+import { requireInstructorApi } from "@/lib/auth";
 
 export async function GET(_: Request, { params }: { params: { id: string } }) {
   const kase = await getCaseById(prisma, params.id);
@@ -11,19 +11,26 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
 }
 
 export async function PUT(req: Request, { params }: { params: { id: string } }) {
+  const instructor = await requireInstructorApi();
+  if (!instructor) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+  }
+
   const existing = await getCaseById(prisma, params.id);
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const session = await getServerSession();
+  if (existing.instructorId !== instructor.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const body = await req.json();
-  const instructorId = body.instructorId || (session?.user as { id?: string } | undefined)?.id || existing.instructorId;
 
   try {
     const payload = casePayloadSchema.parse({
       ...body,
-      instructorId,
+      instructorId: instructor.id,
     });
     const updated = await updateCase(prisma, params.id, payload);
     return NextResponse.json(serializeCase(updated));
@@ -39,9 +46,18 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
 }
 
 export async function DELETE(_: Request, { params }: { params: { id: string } }) {
+  const instructor = await requireInstructorApi();
+  if (!instructor) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+  }
+
   const existing = await getCaseById(prisma, params.id);
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  if (existing.instructorId !== instructor.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   await deleteCaseById(prisma, params.id);

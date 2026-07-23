@@ -15,3 +15,30 @@ body {
 .container {
   @apply mx-auto max-w-5xl px-4;
 }
+
+@media print {
+  @page {
+    margin: 1.5cm;
+  }
+
+  html,
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 11pt;
+  }
+
+  .container {
+    max-width: none;
+    padding: 0;
+  }
+
+  .study-notes-print {
+    color: black !important;
+  }
+
+  .study-notes-print a {
+    text-decoration: none;
+    color: black !important;
+  }
+}

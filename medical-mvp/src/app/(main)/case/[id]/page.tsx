@@ -3,6 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import Link from "next/link";
+import { CaseBookmarkButton } from "@/components/case/CaseBookmarkButton";
+import { PersonalNoteEditor } from "@/components/case/PersonalNoteEditor";
+import { getSessionUser } from "@/lib/auth";
+import { getCaseBookmarkAndNote } from "@/lib/bookmark-service";
 
 export default async function CasePage({ params }: { params: { id: string } }) {
   const kase = await prisma.case.findUnique({
@@ -12,16 +16,28 @@ export default async function CasePage({ params }: { params: { id: string } }) {
   if (!kase) {
     return <div>کیس یافت نشد</div>;
   }
+
+  const sessionUser = await getSessionUser();
+  const bookmarkState = sessionUser?.id
+    ? await getCaseBookmarkAndNote(sessionUser.id, kase.id)
+    : { bookmarked: false, noteContent: null };
+
   const patient = JSON.parse(kase.patientInfo || "{}");
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h1 className="text-2xl font-bold">{kase.title}</h1>
-            <Link href={`/case/${kase.id}/quiz`}>
-              <Button>آزمون</Button>
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              <CaseBookmarkButton
+                caseId={kase.id}
+                initialBookmarked={bookmarkState.bookmarked}
+              />
+              <Link href={`/case/${kase.id}/quiz`}>
+                <Button>آزمون</Button>
+              </Link>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -70,6 +86,11 @@ export default async function CasePage({ params }: { params: { id: string } }) {
           ) : null}
         </CardContent>
       </Card>
+
+      <PersonalNoteEditor
+        caseId={kase.id}
+        initialContent={bookmarkState.noteContent}
+      />
     </div>
   );
 }

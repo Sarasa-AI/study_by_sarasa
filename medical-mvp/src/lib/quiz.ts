@@ -3,6 +3,22 @@ import { answerOptions } from "@/lib/case-schema";
 
 export type AnswerMap = Record<string, string>;
 
+type QuizAnswerOption = (typeof answerOptions)[number];
+export type QuizFormValues = Record<string, QuizAnswerOption>;
+export type DistractorRationales = Partial<Record<QuizAnswerOption, string>>;
+
+export function parseDistractorRationales(value: unknown): DistractorRationales | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const result: DistractorRationales = {};
+  for (const key of answerOptions) {
+    const text = (value as Record<string, unknown>)[key];
+    if (typeof text === "string" && text.trim()) {
+      result[key] = text.trim();
+    }
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
 export type QuizQuestionView = {
   id: string;
   questionText: string;
@@ -10,12 +26,14 @@ export type QuizQuestionView = {
   orderIndex: number;
 };
 
-export type QuestionFeedback = {
+export type GradedQuestionFeedback = {
   questionId: string;
   selected: string | null;
   correctAnswer: string;
   isCorrect: boolean;
   explanation: string | null;
+  clinicalReasoning: string | null;
+  distractorRationales: DistractorRationales | null;
 };
 
 export type GamificationSummary = {
@@ -24,16 +42,24 @@ export type GamificationSummary = {
   streakMaintained: boolean;
 };
 
+export type NewAchievementNotice = {
+  code: string;
+  title: string;
+  description: string;
+  icon: string;
+};
+
 export type QuizResultData = {
   resultId: string;
   score: number;
   total: number;
   percent: number;
-  feedback: QuestionFeedback[];
+  feedback: GradedQuestionFeedback[];
   xp: XpResult;
   streak: StreakResult;
   isNewStreakMilestone: boolean;
   gamification: GamificationSummary;
+  newAchievements?: NewAchievementNotice[];
 };
 
 export type XpResult = {
@@ -66,6 +92,8 @@ type GradingQuestion = {
   id: string;
   correctAnswer: string;
   explanation: string | null;
+  clinicalReasoning: string | null;
+  distractorRationales: DistractorRationales | null;
   points: number;
 };
 
@@ -78,9 +106,6 @@ type QuizQuestionRecord = {
   optionD: string;
   orderIndex: number;
 };
-
-type QuizAnswerOption = (typeof answerOptions)[number];
-export type QuizFormValues = Record<string, QuizAnswerOption>;
 
 const answerOptionSchema = z.enum(answerOptions);
 
@@ -122,7 +147,7 @@ export function gradeQuiz(questions: GradingQuestion[], answers: AnswerMap) {
   const correctMap = buildCorrectMap(questions);
   const { score, total } = scoreAnswers(correctMap, answers);
 
-  const feedback: QuestionFeedback[] = questions.map((question) => {
+  const feedback: GradedQuestionFeedback[] = questions.map((question) => {
     const selected = answers[question.id] ?? null;
     const isCorrect = selected === question.correctAnswer;
     return {
@@ -131,6 +156,8 @@ export function gradeQuiz(questions: GradingQuestion[], answers: AnswerMap) {
       correctAnswer: question.correctAnswer,
       isCorrect,
       explanation: isCorrect ? null : question.explanation ?? "توضیحی ثبت نشده است",
+      clinicalReasoning: question.clinicalReasoning ?? null,
+      distractorRationales: question.distractorRationales ?? null,
     };
   });
 

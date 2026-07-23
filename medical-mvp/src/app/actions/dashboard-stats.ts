@@ -1,10 +1,10 @@
 "use server";
 
-import { getServerSession } from "next-auth";
 import {
   getStudentPerformanceStats,
   type StudentPerformanceStats,
 } from "@/lib/analytics-service";
+import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export type DashboardStreak = {
@@ -26,8 +26,8 @@ export type DashboardStatsResult = {
 };
 
 async function resolveUserId(): Promise<string | null> {
-  const session = await getServerSession();
-  return (session?.user as { id?: string } | undefined)?.id ?? null;
+  const user = await getSessionUser();
+  return user?.id ?? null;
 }
 
 export async function getDashboardStatsAction(): Promise<DashboardStatsResult> {

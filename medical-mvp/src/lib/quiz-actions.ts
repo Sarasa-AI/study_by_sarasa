@@ -1,15 +1,16 @@
 "use server";
 
 import { Prisma } from "@prisma/client";
-import { getServerSession } from "next-auth";
 import { z, type ZodError } from "zod";
 import { isCategoryWeakForUser } from "@/lib/analytics-service";
+import { getSessionUser } from "@/lib/auth";
 import { formatZodError } from "@/lib/case-schema";
-import { awardQuizCompletion, claimQuizXpAward } from "@/lib/gamification-service";
+import { awardQuizCompletion, calculateXp, checkAndAwardAchievements, claimQuizXpAward } from "@/lib/gamification-service";
 import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import {
   gradeQuiz,
+  parseDistractorRationales,
   validateQuizAnswers,
   ZERO_XP,
   type AnswerMap,
@@ -21,8 +22,8 @@ import {
 import { runWithRequestId } from "@/lib/request-context";
 
 async function resolveUserId(): Promise<string | null> {
-  const session = await getServerSession();
-  return (session?.user as { id?: string } | undefined)?.id ?? null;
+  const user = await getSessionUser();
+  return user?.id ?? null;
 }
 
 function handleQuizActionError(error: unknown): QuizActionResult {
@@ -121,6 +122,8 @@ export async function submitQuizAction(
               id: true,
               correctAnswer: true,
               explanation: true,
+              clinicalReasoning: true,
+              distractorRationales: true,
               points: true,
             },
           },
@@ -138,7 +141,16 @@ export async function submitQuizAction(
       const questionIds = kase.questions.map((question) => question.id);
       validateQuizAnswers(questionIds, answers);
 
-      const { score, total, percent, feedback } = gradeQuiz(kase.questions, answers);
+      const gradingQuestions = kase.questions.map((question) => ({
+        id: question.id,
+        correctAnswer: question.correctAnswer,
+        explanation: question.explanation,
+        clinicalReasoning: question.clinicalReasoning,
+        distractorRationales: parseDistractorRationales(question.distractorRationales),
+        points: question.points,
+      }));
+
+      const { score, total, percent, feedback } = gradeQuiz(gradingQuestions, answers);
       const accuracy = total > 0 ? score / total : 0;
       const completionTimeSeconds = timeSpent ?? null;
       const isRemedial = await isCategoryWeakForUser(userId, kase.categoryId);
@@ -160,6 +172,31 @@ export async function submitQuizAction(
               answers: answers as Prisma.InputJsonValue,
             },
           });
+
+          for (const item of feedback) {
+            if (!item.isCorrect) {
+              await tx.questionMistake.upsert({
+                where: {
+                  userId_questionId: { userId, questionId: item.questionId },
+                },
+                create: {
+                  userId,
+                  questionId: item.questionId,
+                  isResolved: false,
+                },
+                update: { isResolved: false },
+              });
+            } else {
+              await tx.questionMistake.updateMany({
+                where: {
+                  userId,
+                  questionId: item.questionId,
+                  isResolved: false,
+                },
+                data: { isResolved: true },
+              });
+            }
+          }
 
           await tx.userProgress.upsert({
             where: { userId_caseId: { userId, caseId } },
@@ -184,7 +221,8 @@ export async function submitQuizAction(
             };
           }
 
-          const claimed = await claimQuizXpAward(userId, caseId, quizResult.id, tx);
+          const xpPreview = calculateXp(accuracy, isRemedial);
+          const claimed = await claimQuizXpAward(userId, caseId, quizResult.id, xpPreview, tx);
           if (!claimed) {
             const user = await tx.user.findUniqueOrThrow({
               where: { id: userId },
@@ -209,6 +247,8 @@ export async function submitQuizAction(
         },
       );
 
+      const newAchievements = await checkAndAwardAchievements(userId);
+
       logger.info(
         {
           event: "quiz.submit.complete",
@@ -216,6 +256,7 @@ export async function submitQuizAction(
           caseId,
           accuracy,
           xpEarned: gamification.gamification.xpEarned,
+          newAchievements: newAchievements.map((a) => a.code),
         },
         "Quiz submission completed",
       );
@@ -233,6 +274,7 @@ export async function submitQuizAction(
           streak: gamification.streak,
           isNewStreakMilestone: gamification.isNewStreakMilestone,
           gamification: gamification.gamification,
+          newAchievements,
         },
       };
     } catch (error) {
@@ -248,4 +290,156 @@ export async function submitQuizAction(
       return handleQuizActionError(error);
     }
   }, { operation: "quiz-submit", userId });
+}
+
+export async function submitReviewQuizAction(
+  questionIds: string[],
+  answers: AnswerMap,
+  timeSpent?: number,
+): Promise<QuizActionResult> {
+  const userId = await resolveUserId();
+  if (!userId) {
+    return { success: false, message: "برای شرکت در آزمون باید وارد شوید" };
+  }
+
+  if (questionIds.length === 0) {
+    return { success: false, message: "سوالی برای مرور انتخاب نشده است" };
+  }
+
+  return runWithRequestId(async () => {
+    const logger = getLogger();
+
+    try {
+      logger.info(
+        {
+          event: "quiz.review.submit.start",
+          userId,
+          questionCount: questionIds.length,
+        },
+        "Review quiz submission started",
+      );
+
+      const pendingMistakes = await prisma.questionMistake.findMany({
+        where: {
+          userId,
+          questionId: { in: questionIds },
+          isResolved: false,
+        },
+        select: { questionId: true },
+      });
+
+      const pendingIds = new Set(pendingMistakes.map((mistake) => mistake.questionId));
+      if (pendingIds.size !== questionIds.length || questionIds.some((id) => !pendingIds.has(id))) {
+        return { success: false, message: "برخی سؤالات در صف مرور شما نیستند" };
+      }
+
+      const questions = await prisma.question.findMany({
+        where: { id: { in: questionIds } },
+        select: {
+          id: true,
+          correctAnswer: true,
+          explanation: true,
+          clinicalReasoning: true,
+          distractorRationales: true,
+          points: true,
+        },
+      });
+
+      if (questions.length !== questionIds.length) {
+        return { success: false, message: "برخی سؤالات یافت نشدند" };
+      }
+
+      const questionById = new Map(questions.map((question) => [question.id, question]));
+      const orderedQuestions = questionIds.map((id) => questionById.get(id)!);
+
+      validateQuizAnswers(questionIds, answers);
+
+      const gradingQuestions = orderedQuestions.map((question) => ({
+        id: question.id,
+        correctAnswer: question.correctAnswer,
+        explanation: question.explanation,
+        clinicalReasoning: question.clinicalReasoning,
+        distractorRationales: parseDistractorRationales(question.distractorRationales),
+        points: question.points,
+      }));
+
+      const { score, total, percent, feedback } = gradeQuiz(gradingQuestions, answers);
+
+      const user = await prisma.$transaction(async (tx) => {
+        for (const item of feedback) {
+          if (!item.isCorrect) {
+            await tx.questionMistake.upsert({
+              where: {
+                userId_questionId: { userId, questionId: item.questionId },
+              },
+              create: {
+                userId,
+                questionId: item.questionId,
+                isResolved: false,
+              },
+              update: { isResolved: false },
+            });
+          } else {
+            await tx.questionMistake.updateMany({
+              where: {
+                userId,
+                questionId: item.questionId,
+                isResolved: false,
+              },
+              data: { isResolved: true },
+            });
+          }
+        }
+
+        return tx.user.findUniqueOrThrow({
+          where: { id: userId },
+          select: { currentStreak: true },
+        });
+      });
+
+      const gamification = buildSkippedGamification(user.currentStreak);
+      const newAchievements = await checkAndAwardAchievements(userId);
+
+      logger.info(
+        {
+          event: "quiz.review.submit.complete",
+          userId,
+          questionCount: questionIds.length,
+          score,
+          total,
+          timeSpent: timeSpent ?? null,
+          newAchievements: newAchievements.map((a) => a.code),
+        },
+        "Review quiz submission completed",
+      );
+
+      return {
+        success: true,
+        message: "مرور با موفقیت ثبت شد",
+        data: {
+          resultId: "",
+          score,
+          total,
+          percent,
+          feedback,
+          xp: gamification.xp,
+          streak: gamification.streak,
+          isNewStreakMilestone: gamification.isNewStreakMilestone,
+          gamification: gamification.gamification,
+          newAchievements,
+        },
+      };
+    } catch (error) {
+      logger.error(
+        {
+          event: "quiz.review.submit.failed",
+          userId,
+          questionCount: questionIds.length,
+          errorType: error instanceof Error ? error.name : "UnknownError",
+        },
+        "Review quiz submission failed",
+      );
+      return handleQuizActionError(error);
+    }
+  }, { operation: "quiz-review-submit", userId });
 }

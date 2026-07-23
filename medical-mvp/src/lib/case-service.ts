@@ -27,16 +27,32 @@ export const caseDetailsInclude = {
 };
 
 export function buildQuestionCreateData(questions: CasePayload["questions"]) {
-  return questions.map((question: CasePayload["questions"][number], index: number) => ({
-    questionText: question.questionText,
-    optionA: question.optionA,
-    optionB: question.optionB,
-    optionC: question.optionC,
-    optionD: question.optionD,
-    correctAnswer: question.correctAnswer,
-    explanation: question.explanation,
-    orderIndex: index,
-  }));
+  return questions.map((question: CasePayload["questions"][number], index: number) => {
+    const clinicalReasoning = question.clinicalReasoning?.trim() || null;
+    const distractorRationales = question.distractorRationales
+      ? Object.fromEntries(
+          Object.entries(question.distractorRationales).filter(
+            ([, text]) => typeof text === "string" && text.trim().length > 0,
+          ),
+        )
+      : null;
+
+    return {
+      questionText: question.questionText,
+      optionA: question.optionA,
+      optionB: question.optionB,
+      optionC: question.optionC,
+      optionD: question.optionD,
+      correctAnswer: question.correctAnswer,
+      explanation: question.explanation,
+      clinicalReasoning,
+      distractorRationales:
+        distractorRationales && Object.keys(distractorRationales).length > 0
+          ? distractorRationales
+          : null,
+      orderIndex: index,
+    };
+  });
 }
 
 export function buildCaseCreateData(payload: CasePayload) {

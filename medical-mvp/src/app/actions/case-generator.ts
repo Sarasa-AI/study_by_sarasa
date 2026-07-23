@@ -1,16 +1,13 @@
 "use server";
 
 import { Prisma, Role } from "@prisma/client";
-import { getServerSession } from "next-auth";
 import { z, type ZodError } from "zod";
+import { generateCaseWithAI } from "@/lib/ai-case-generator";
 import {
-  aiCaseGenerationSchema,
   buildPatientInfoFromAi,
   mapAiCaseToFormValues,
-  normalizeAiCaseGeneration,
   type AiCaseGeneration,
 } from "@/lib/ai-schemas";
-import { generateStructuredData } from "@/lib/ai";
 import { mapAiErrorToClientMessage } from "@/lib/ai-errors";
 import { isCategoryWeakForUser } from "@/lib/analytics-service";
 import {
@@ -21,6 +18,7 @@ import {
   formatZodError,
 } from "@/lib/case-schema";
 import { createCase, serializeCase } from "@/lib/case-service";
+import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { runWithRequestId } from "@/lib/request-context";
 
@@ -31,18 +29,6 @@ export type CaseGenerationResult = CaseActionResult & {
     caseId?: string;
   };
 };
-
-type SessionUser = {
-  id: string;
-  role: Role;
-};
-
-async function resolveSessionUser(): Promise<SessionUser | null> {
-  const session = await getServerSession();
-  const user = session?.user as { id?: string; role?: Role } | undefined;
-  if (!user?.id) return null;
-  return { id: user.id, role: user.role ?? Role.STUDENT };
-}
 
 async function resolveSystemInstructorId(): Promise<string | null> {
   const instructor = await prisma.user.findFirst({
@@ -69,51 +55,11 @@ function handleGenerationError(error: unknown): CaseGenerationResult {
     return { success: false, message: aiMessage };
   }
 
-  return { success: false, message: "خطای سرور" };
-}
-
-function buildClinicalPrompt(categoryName: string, topic?: string, isRemedial = false): string {
-  const focus = topic?.trim()
-    ? `Focus the case on: "${topic.trim()}".`
-    : `Choose a high-yield pediatric topic appropriate for the "${categoryName}" category.`;
-
-  const lines = [
-    "Generate one complete pediatric clinical teaching case.",
-    focus,
-    "Use evidence-based content aligned with Nelson Textbook of Pediatrics and UpToDate pediatric guidelines.",
-    "Write clinical content in Persian (Farsi). Use standard medical abbreviations where appropriate.",
-    "Include realistic age-appropriate presentation, vitals, exam findings, labs, and imaging when relevant.",
-    "The MCQ must test clinical reasoning (diagnosis or management), not trivia.",
-    "Return JSON matching the required schema exactly.",
-  ];
-
-  if (isRemedial) {
-    lines.splice(
-      2,
-      0,
-      `This is a Targeted Practice session for the "${categoryName}" category — emphasize core concepts and common pitfalls.`,
-    );
+  if (error instanceof Error && error.message.includes("expected")) {
+    return { success: false, message: "تعداد سوالات تولیدشده با درخواست شما مطابقت ندارد؛ دوباره تلاش کنید" };
   }
 
-  return lines.join("\n");
-}
-
-const SYSTEM_INSTRUCTION = [
-  "You are a senior Pediatrics attending physician authoring board-style teaching cases.",
-  "Output must be clinically accurate, age-appropriate, and educationally focused.",
-  "Use management and teachingPoints fields (not deprecated alternatives).",
-  "Use optionA–optionD and correctOption (A|B|C|D) for the question.",
-].join(" ");
-
-const REMEDIAL_INSTRUCTION = [
-  "This student is struggling with this category.",
-  "Focus the case on the core concepts, common diagnostic pitfalls, and pathophysiology related to this topic to help them improve their understanding.",
-  "Treat this as a Targeted Practice session.",
-].join(" ");
-
-function buildSystemInstruction(isRemedial: boolean): string {
-  if (!isRemedial) return SYSTEM_INSTRUCTION;
-  return [SYSTEM_INSTRUCTION, REMEDIAL_INSTRUCTION].join(" ");
+  return { success: false, message: "خطای سرور" };
 }
 
 function toCasePayload(
@@ -136,17 +82,17 @@ function toCasePayload(
     management: data.management,
     teachingPoints: data.teachingPoints,
     status,
-    questions: [
-      {
-        questionText: data.question.questionText,
-        optionA: data.question.optionA,
-        optionB: data.question.optionB,
-        optionC: data.question.optionC,
-        optionD: data.question.optionD,
-        correctAnswer: data.question.correctOption,
-        explanation: data.question.explanation,
-      },
-    ],
+    questions: data.questions.map((question) => ({
+      questionText: question.questionText,
+      optionA: question.optionA,
+      optionB: question.optionB,
+      optionC: question.optionC,
+      optionD: question.optionD,
+      correctAnswer: question.correctAnswer,
+      explanation: question.explanation,
+      clinicalReasoning: question.clinicalReasoning,
+      distractorRationales: question.distractorRationales,
+    })),
   });
 }
 
@@ -157,7 +103,7 @@ export async function generateClinicalCaseAction(
   persist = false,
 ): Promise<CaseGenerationResult> {
   return runWithRequestId(async () => {
-    const sessionUser = await resolveSessionUser();
+    const sessionUser = await getSessionUser();
     if (!sessionUser) {
       return { success: false, message: "برای تولید کیس باید وارد شوید" };
     }
@@ -199,14 +145,12 @@ export async function generateClinicalCaseAction(
         }
       }
 
-      const aiData = normalizeAiCaseGeneration(
-        (await generateStructuredData({
-          operation: "case-generation",
-          schema: aiCaseGenerationSchema,
-          systemInstruction: buildSystemInstruction(isRemedial),
-          prompt: buildClinicalPrompt(category.name, topic, isRemedial),
-        })) as z.infer<typeof aiCaseGenerationSchema>,
-      );
+      const aiData = await generateCaseWithAI({
+        topic: topic?.trim() ?? "",
+        categoryName: category.name,
+        questionCount: 1,
+        isRemedial,
+      });
 
       const formValues = mapAiCaseToFormValues(aiData, category.id);
 

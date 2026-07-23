@@ -1,7 +1,6 @@
 "use server";
 
-import { Prisma } from "@prisma/client";
-import { getServerSession } from "next-auth";
+import { Prisma, Role } from "@prisma/client";
 import { ZodError } from "zod";
 import {
   type CaseActionResult,
@@ -11,11 +10,18 @@ import {
   toCasePayload,
 } from "@/lib/case-schema";
 import { createCase, getCaseById, serializeCase, updateCase } from "@/lib/case-service";
+import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-async function resolveInstructorId(): Promise<string | null> {
-  const session = await getServerSession();
-  return (session?.user as { id?: string } | undefined)?.id ?? null;
+async function resolveInstructorId(): Promise<{ id: string } | { error: string }> {
+  const user = await getSessionUser();
+  if (!user) {
+    return { error: "UNAUTHORIZED" };
+  }
+  if (user.role !== Role.INSTRUCTOR) {
+    return { error: "FORBIDDEN" };
+  }
+  return { id: user.id };
 }
 
 function handleActionError(error: unknown): CaseActionResult {
@@ -33,14 +39,21 @@ function handleActionError(error: unknown): CaseActionResult {
   return { success: false, message: "خطای سرور" };
 }
 
+function authErrorMessage(code: string, action: "create" | "update"): string {
+  if (code === "UNAUTHORIZED") {
+    return action === "create" ? "برای ایجاد کیس باید وارد شوید" : "برای ویرایش کیس باید وارد شوید";
+  }
+  return "فقط استادان می‌توانند کیس ایجاد یا ویرایش کنند";
+}
+
 export async function createCaseAction(values: CaseFormValues, status: CaseStatusValue): Promise<CaseActionResult> {
-  const instructorId = await resolveInstructorId();
-  if (!instructorId) {
-    return { success: false, message: "برای ایجاد کیس باید وارد شوید" };
+  const resolved = await resolveInstructorId();
+  if ("error" in resolved) {
+    return { success: false, message: authErrorMessage(resolved.error, "create") };
   }
 
   try {
-    const payload = toCasePayload(values, instructorId, status);
+    const payload = toCasePayload(values, resolved.id, status);
     const created = await prisma.$transaction((tx) => createCase(tx, payload));
     return {
       success: true,
@@ -57,9 +70,9 @@ export async function updateCaseAction(
   values: CaseFormValues,
   status: CaseStatusValue,
 ): Promise<CaseActionResult> {
-  const instructorId = await resolveInstructorId();
-  if (!instructorId) {
-    return { success: false, message: "برای ویرایش کیس باید وارد شوید" };
+  const resolved = await resolveInstructorId();
+  if ("error" in resolved) {
+    return { success: false, message: authErrorMessage(resolved.error, "update") };
   }
 
   try {
@@ -67,11 +80,11 @@ export async function updateCaseAction(
     if (!existing) {
       return { success: false, message: "کیس یافت نشد" };
     }
-    if (existing.instructorId !== instructorId) {
+    if (existing.instructorId !== resolved.id) {
       return { success: false, message: "شما اجازه ویرایش این کیس را ندارید" };
     }
 
-    const payload = toCasePayload(values, instructorId, status);
+    const payload = toCasePayload(values, resolved.id, status);
     const updated = await prisma.$transaction((tx) => updateCase(tx, id, payload));
     return {
       success: true,

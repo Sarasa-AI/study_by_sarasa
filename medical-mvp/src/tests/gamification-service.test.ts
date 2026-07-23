@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { calculateXp, calculateStreakUpdate } from "@/lib/gamification-service";
+import {
+  calculateXp,
+  calculateStreakUpdate,
+  evaluateAchievementUnlocks,
+  getAchievementCurrentValue,
+  isAchievementEarned,
+  type AchievementDef,
+  type UserAchievementStats,
+} from "@/lib/gamification-service";
 
 describe("calculateXp", () => {
   it("awards base completion XP only", () => {
@@ -91,4 +99,96 @@ describe("atomic streak SQL parity scenarios", () => {
       expect(calculateStreakUpdate(priorLastCompletedAt, now, currentStreak)).toEqual(expected);
     },
   );
+});
+
+const sampleAchievements: AchievementDef[] = [
+  {
+    id: "a1",
+    code: "STREAK_7",
+    title: "استریک ۷ روزه",
+    description: "هفت روز",
+    icon: "⚡",
+    category: "STREAK",
+    threshold: 7,
+  },
+  {
+    id: "a2",
+    code: "CASES_10",
+    title: "۱۰ کیس",
+    description: "ده کیس",
+    icon: "📚",
+    category: "CASES",
+    threshold: 10,
+  },
+  {
+    id: "a3",
+    code: "FLASHCARDS_50",
+    title: "۵۰ فلش‌کارت",
+    description: "پنجاه کارت",
+    icon: "🧠",
+    category: "FLASHCARDS",
+    threshold: 50,
+  },
+  {
+    id: "a4",
+    code: "ACCURACY_80",
+    title: "دقت ۸۰٪",
+    description: "دقت بالا",
+    icon: "🎯",
+    category: "ACCURACY",
+    threshold: 80,
+  },
+  {
+    id: "a5",
+    code: "QUESTIONS_50",
+    title: "۵۰ سوال",
+    description: "پنجاه سوال",
+    icon: "✅",
+    category: "ACCURACY",
+    threshold: 50,
+  },
+];
+
+describe("achievement eligibility helpers", () => {
+  const baseStats: UserAchievementStats = {
+    currentStreak: 7,
+    completedCases: 10,
+    flashcardsReviewed: 12,
+    questionsAnswered: 25,
+    accuracyPercent: 85,
+  };
+
+  it("maps current values by category and special codes", () => {
+    expect(getAchievementCurrentValue(sampleAchievements[0]!, baseStats)).toBe(7);
+    expect(getAchievementCurrentValue(sampleAchievements[1]!, baseStats)).toBe(10);
+    expect(getAchievementCurrentValue(sampleAchievements[2]!, baseStats)).toBe(12);
+    expect(getAchievementCurrentValue(sampleAchievements[3]!, baseStats)).toBe(85);
+    expect(getAchievementCurrentValue(sampleAchievements[4]!, baseStats)).toBe(25);
+  });
+
+  it("requires min questions for ACCURACY_80", () => {
+    expect(
+      isAchievementEarned(sampleAchievements[3]!, {
+        ...baseStats,
+        questionsAnswered: 10,
+        accuracyPercent: 90,
+      }),
+    ).toBe(false);
+
+    expect(isAchievementEarned(sampleAchievements[3]!, baseStats)).toBe(true);
+  });
+
+  it("returns only newly earned achievements", () => {
+    const unlocked = evaluateAchievementUnlocks(
+      baseStats,
+      sampleAchievements,
+      new Set(["a1"]),
+    );
+
+    expect(unlocked.map((a) => a.code).sort()).toEqual(["ACCURACY_80", "CASES_10"]);
+  });
+
+  it("does not unlock flashcard badge below threshold", () => {
+    expect(isAchievementEarned(sampleAchievements[2]!, baseStats)).toBe(false);
+  });
 });

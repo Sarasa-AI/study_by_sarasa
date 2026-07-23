@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   gradeQuiz,
+  parseDistractorRationales,
   scoreAnswers,
   validateQuizAnswers,
 } from "@/lib/quiz";
@@ -25,12 +26,24 @@ describe("gradeQuiz", () => {
       id: "q1",
       correctAnswer: "A",
       explanation: "Explanation for q1",
+      clinicalReasoning: "Step-by-step for q1",
+      distractorRationales: {
+        B: "B is wrong because...",
+        C: "C is wrong because...",
+        D: "D is wrong because...",
+      },
       points: 2,
     },
     {
       id: "q2",
       correctAnswer: "B",
       explanation: "Explanation for q2",
+      clinicalReasoning: "Step-by-step for q2",
+      distractorRationales: {
+        A: "A is wrong because...",
+        C: "C is wrong because...",
+        D: "D is wrong because...",
+      },
       points: 1,
     },
   ];
@@ -47,6 +60,12 @@ describe("gradeQuiz", () => {
       questionId: "q1",
       isCorrect: true,
       explanation: null,
+      clinicalReasoning: "Step-by-step for q1",
+      distractorRationales: {
+        B: "B is wrong because...",
+        C: "C is wrong because...",
+        D: "D is wrong because...",
+      },
     });
     expect(result.feedback[1]).toMatchObject({
       questionId: "q2",
@@ -54,7 +73,51 @@ describe("gradeQuiz", () => {
       selected: "C",
       correctAnswer: "B",
       explanation: "Explanation for q2",
+      clinicalReasoning: "Step-by-step for q2",
+      distractorRationales: {
+        A: "A is wrong because...",
+        C: "C is wrong because...",
+        D: "D is wrong because...",
+      },
     });
+  });
+
+  it("treats missing answers as incorrect (exam auto-submit)", () => {
+    const result = gradeQuiz(questions, { q1: "A" });
+
+    expect(result.score).toBe(2);
+    expect(result.total).toBe(3);
+    expect(result.feedback[0]).toMatchObject({
+      questionId: "q1",
+      selected: "A",
+      isCorrect: true,
+    });
+    expect(result.feedback[1]).toMatchObject({
+      questionId: "q2",
+      selected: null,
+      isCorrect: false,
+      correctAnswer: "B",
+      explanation: "Explanation for q2",
+    });
+  });
+});
+
+describe("parseDistractorRationales", () => {
+  it("keeps only valid option keys with non-empty text", () => {
+    expect(
+      parseDistractorRationales({
+        A: " bad A ",
+        B: "",
+        E: "ignore",
+        C: "ok C",
+      }),
+    ).toEqual({ A: "bad A", C: "ok C" });
+  });
+
+  it("returns null for empty or invalid input", () => {
+    expect(parseDistractorRationales(null)).toBeNull();
+    expect(parseDistractorRationales([])).toBeNull();
+    expect(parseDistractorRationales({ A: "   " })).toBeNull();
   });
 });
 

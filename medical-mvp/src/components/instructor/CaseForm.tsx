@@ -34,17 +34,31 @@ type CaseFormProps = {
   categories: Category[];
   instructorId: string;
   initialCase?: ExistingCase | null;
+  initialValues?: CaseFormValues | null;
   submitLabel?: string;
+  redirectTo?: string;
+  showAiPrefill?: boolean;
 };
 
-export function CaseForm({ categories, instructorId: _instructorId, initialCase, submitLabel = "ذخیره تغییرات" }: CaseFormProps) {
+export function CaseForm({
+  categories,
+  instructorId: _instructorId,
+  initialCase,
+  initialValues = null,
+  submitLabel = "ذخیره تغییرات",
+  redirectTo = "/instructor",
+  showAiPrefill = true,
+}: CaseFormProps) {
   const router = useRouter();
   const [submittingStatus, setSubmittingStatus] = useState<CaseStatusValue | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiTopic, setAiTopic] = useState("");
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
-  const defaultValues = useMemo(() => toCaseFormValues(initialCase ?? null), [initialCase]);
+  const defaultValues = useMemo(
+    () => initialValues ?? toCaseFormValues(initialCase ?? null),
+    [initialCase, initialValues],
+  );
   const {
     register,
     control,
@@ -110,7 +124,7 @@ export function CaseForm({ categories, instructorId: _instructorId, initialCase,
         return;
       }
 
-      router.push("/instructor/cases");
+      router.push(redirectTo);
       router.refresh();
     } finally {
       setSubmittingStatus(null);
@@ -150,27 +164,31 @@ export function CaseForm({ categories, instructorId: _instructorId, initialCase,
             </select>
             {errors.categoryId ? <p className="mt-1 text-sm text-red-600">{errors.categoryId.message}</p> : null}
           </div>
-          <div>
-            <label className="mb-1 block text-sm">موضوع بالینی برای هوش مصنوعی (اختیاری)</label>
-            <Input
-              value={aiTopic}
-              onChange={(event) => setAiTopic(event.target.value)}
-              disabled={isBusy}
-              placeholder="مثال: کتواسیدوز دیابتی"
-            />
-          </div>
-          <div className="md:col-span-2">
-            <Button type="button" variant="secondary" disabled={isBusy} onClick={handleAiPrefill}>
-              {isGenerating ? (
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  در حال تولید...
-                </span>
-              ) : (
-                "پیش‌پر کردن با هوش مصنوعی"
-              )}
-            </Button>
-          </div>
+          {showAiPrefill ? (
+            <>
+              <div>
+                <label className="mb-1 block text-sm">موضوع بالینی برای هوش مصنوعی (اختیاری)</label>
+                <Input
+                  value={aiTopic}
+                  onChange={(event) => setAiTopic(event.target.value)}
+                  disabled={isBusy}
+                  placeholder="مثال: کتواسیدوز دیابتی"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <Button type="button" variant="secondary" disabled={isBusy} onClick={handleAiPrefill}>
+                  {isGenerating ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      در حال تولید...
+                    </span>
+                  ) : (
+                    "پیش‌پر کردن با هوش مصنوعی"
+                  )}
+                </Button>
+              </div>
+            </>
+          ) : null}
           <div>
             <label className="mb-1 block text-sm">شکایت اصلی</label>
             <Input {...register("chiefComplaint")} placeholder="مثال: درد قفسه سینه ۳۰ دقیقه‌ای" />
@@ -258,6 +276,8 @@ export function CaseForm({ categories, instructorId: _instructorId, initialCase,
                 optionD: "",
                 correctAnswer: "A",
                 explanation: "",
+                clinicalReasoning: null,
+                distractorRationales: null,
               })
             }
           >
@@ -316,6 +336,22 @@ export function CaseForm({ categories, instructorId: _instructorId, initialCase,
                   <label className="mb-1 block text-sm">توضیح پاسخ</label>
                   <Textarea {...register(`questions.${index}.explanation`)} />
                 </div>
+                <div className="md:col-span-2">
+                  <label className="mb-1 block text-sm">استدلال بالینی (گام‌به‌گام)</label>
+                  <Textarea {...register(`questions.${index}.clinicalReasoning`)} />
+                </div>
+                <div className="md:col-span-2 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-sm font-medium text-slate-800">دلایل رد گزینه‌های نادرست</div>
+                  {answerOptions.map((option) => (
+                    <div key={option}>
+                      <label className="mb-1 block text-xs text-slate-600">گزینه {option}</label>
+                      <Textarea
+                        {...register(`questions.${index}.distractorRationales.${option}`)}
+                        placeholder={`چرا گزینه ${option} نادرست است (در صورت نادرست بودن)`}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           ))}
@@ -335,7 +371,13 @@ export function CaseForm({ categories, instructorId: _instructorId, initialCase,
           {submittingStatus === "DRAFT" ? "در حال ذخیره..." : "پیش‌نویس"}
         </Button>
         <Button type="button" disabled={isBusy} onClick={handleSubmit((values) => submitForm(values, "PUBLISHED"))}>
-          {submittingStatus === "PUBLISHED" ? "در حال انتشار..." : initialCase?.id ? submitLabel : "انتشار"}
+          {submittingStatus === "PUBLISHED"
+            ? "در حال انتشار..."
+            : initialCase?.id
+              ? submitLabel
+              : submitLabel !== "ذخیره تغییرات"
+                ? submitLabel
+                : "انتشار"}
         </Button>
       </div>
     </form>

@@ -1,17 +1,34 @@
 import { z } from "zod";
 import { answerOptions, type CaseFormValues } from "@/lib/case-schema";
 
-export const aiCaseQuestionSchema = z.object({
-  questionText: z.string().trim().min(1, "متن سوال الزامی است"),
-  optionA: z.string().trim().min(1, "گزینه A الزامی است"),
-  optionB: z.string().trim().min(1, "گزینه B الزامی است"),
-  optionC: z.string().trim().min(1, "گزینه C الزامی است"),
-  optionD: z.string().trim().min(1, "گزینه D الزامی است"),
-  correctOption: z.enum(answerOptions, {
-    errorMap: () => ({ message: "پاسخ صحیح باید A، B، C یا D باشد" }),
-  }),
-  explanation: z.string().trim().min(1, "توضیح پاسخ الزامی است"),
-});
+export const aiCaseQuestionSchema = z
+  .object({
+    questionText: z.string().trim().min(1, "متن سوال الزامی است"),
+    optionA: z.string().trim().min(1, "گزینه A الزامی است"),
+    optionB: z.string().trim().min(1, "گزینه B الزامی است"),
+    optionC: z.string().trim().min(1, "گزینه C الزامی است"),
+    optionD: z.string().trim().min(1, "گزینه D الزامی است"),
+    correctAnswer: z.enum(answerOptions, {
+      errorMap: () => ({ message: "پاسخ صحیح باید A، B، C یا D باشد" }),
+    }),
+    explanation: z.string().trim().min(1, "توضیح پاسخ الزامی است"),
+    clinicalReasoning: z.string().trim().min(1, "استدلال بالینی الزامی است"),
+    distractorRationales: z
+      .record(z.enum(answerOptions), z.string().trim().min(1))
+      .refine((r) => Object.keys(r).length === 3, {
+        message: "باید برای هر سه گزینه نادرست rationale وجود داشته باشد",
+      }),
+  })
+  .superRefine((question, ctx) => {
+    const keys = Object.keys(question.distractorRationales);
+    if (keys.includes(question.correctAnswer)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["distractorRationales"],
+        message: "rationale نباید برای گزینه صحیح باشد",
+      });
+    }
+  });
 
 export const aiCaseGenerationSchema = z.object({
   title: z.string().trim().min(5, "عنوان باید حداقل ۵ کاراکتر باشد"),
@@ -31,7 +48,7 @@ export const aiCaseGenerationSchema = z.object({
     .min(1, "حداقل یک تشخیص افتراقی لازم است"),
   management: z.string().trim().min(1, "مدیریت الزامی است"),
   teachingPoints: z.array(z.string().trim().min(1)).min(1, "حداقل یک نکته آموزشی لازم است"),
-  question: aiCaseQuestionSchema,
+  questions: z.array(aiCaseQuestionSchema).min(1).max(3),
 });
 
 export type AiCaseGeneration = {
@@ -50,7 +67,7 @@ export type AiCaseGeneration = {
   differentialDiagnosis: string[];
   management: string;
   teachingPoints: string[];
-  question: z.infer<typeof aiCaseQuestionSchema>;
+  questions: z.infer<typeof aiCaseQuestionSchema>[];
 };
 
 export function normalizeAiCaseGeneration(data: z.infer<typeof aiCaseGenerationSchema>): AiCaseGeneration {
@@ -100,16 +117,16 @@ export function mapAiCaseToFormValues(data: AiCaseGeneration, categoryId: string
     differentialDiagnosisText: data.differentialDiagnosis.join("\n"),
     management: data.management,
     teachingPointsText: data.teachingPoints.join("\n"),
-    questions: [
-      {
-        questionText: data.question.questionText,
-        optionA: data.question.optionA,
-        optionB: data.question.optionB,
-        optionC: data.question.optionC,
-        optionD: data.question.optionD,
-        correctAnswer: data.question.correctOption,
-        explanation: data.question.explanation,
-      },
-    ],
+    questions: data.questions.map((question) => ({
+      questionText: question.questionText,
+      optionA: question.optionA,
+      optionB: question.optionB,
+      optionC: question.optionC,
+      optionD: question.optionD,
+      correctAnswer: question.correctAnswer,
+      explanation: question.explanation,
+      clinicalReasoning: question.clinicalReasoning,
+      distractorRationales: question.distractorRationales,
+    })),
   };
 }
