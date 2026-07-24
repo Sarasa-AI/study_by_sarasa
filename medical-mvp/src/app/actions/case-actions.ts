@@ -11,7 +11,9 @@ import {
 } from "@/lib/case-schema";
 import { createCase, getCaseById, serializeCase, updateCase } from "@/lib/case-service";
 import { getSessionUser } from "@/lib/auth";
+import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { withServerAction } from "@/lib/server-action";
 
 async function resolveInstructorId(): Promise<{ id: string } | { error: string }> {
   const user = await getSessionUser();
@@ -22,6 +24,13 @@ async function resolveInstructorId(): Promise<{ id: string } | { error: string }
     return { error: "FORBIDDEN" };
   }
   return { id: user.id };
+}
+
+function serializeCaughtError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message, stack: error.stack };
+  }
+  return { message: "UnknownError" };
 }
 
 function handleActionError(error: unknown): CaseActionResult {
@@ -52,17 +61,34 @@ export async function createCaseAction(values: CaseFormValues, status: CaseStatu
     return { success: false, message: authErrorMessage(resolved.error, "create") };
   }
 
-  try {
-    const payload = toCasePayload(values, resolved.id, status);
-    const created = await prisma.$transaction((tx) => createCase(tx, payload));
-    return {
-      success: true,
-      message: status === "PUBLISHED" ? "کیس با موفقیت منتشر شد" : "پیش‌نویس ذخیره شد",
-      data: serializeCase(created),
-    };
-  } catch (error) {
-    return handleActionError(error);
-  }
+  return withServerAction(
+    {
+      operation: "case-create",
+      userId: resolved.id,
+      input: { status, categoryId: values.categoryId, titleLength: values.title?.length ?? 0 },
+    },
+    async () => {
+      try {
+        const payload = toCasePayload(values, resolved.id, status);
+        const created = await prisma.$transaction((tx) => createCase(tx, payload));
+        return {
+          success: true,
+          message: status === "PUBLISHED" ? "کیس با موفقیت منتشر شد" : "پیش‌نویس ذخیره شد",
+          data: serializeCase(created),
+        };
+      } catch (error) {
+        getLogger().error(
+          {
+            event: "case.create.failed",
+            userId: resolved.id,
+            err: serializeCaughtError(error),
+          },
+          "Case create failed",
+        );
+        return handleActionError(error);
+      }
+    },
+  );
 }
 
 export async function updateCaseAction(
@@ -75,23 +101,41 @@ export async function updateCaseAction(
     return { success: false, message: authErrorMessage(resolved.error, "update") };
   }
 
-  try {
-    const existing = await getCaseById(prisma, id);
-    if (!existing) {
-      return { success: false, message: "کیس یافت نشد" };
-    }
-    if (existing.instructorId !== resolved.id) {
-      return { success: false, message: "شما اجازه ویرایش این کیس را ندارید" };
-    }
+  return withServerAction(
+    {
+      operation: "case-update",
+      userId: resolved.id,
+      input: { caseId: id, status, categoryId: values.categoryId },
+    },
+    async () => {
+      try {
+        const existing = await getCaseById(prisma, id);
+        if (!existing) {
+          return { success: false, message: "کیس یافت نشد" };
+        }
+        if (existing.instructorId !== resolved.id) {
+          return { success: false, message: "شما اجازه ویرایش این کیس را ندارید" };
+        }
 
-    const payload = toCasePayload(values, resolved.id, status);
-    const updated = await prisma.$transaction((tx) => updateCase(tx, id, payload));
-    return {
-      success: true,
-      message: status === "PUBLISHED" ? "کیس با موفقیت به‌روزرسانی شد" : "پیش‌نویس به‌روزرسانی شد",
-      data: serializeCase(updated),
-    };
-  } catch (error) {
-    return handleActionError(error);
-  }
+        const payload = toCasePayload(values, resolved.id, status);
+        const updated = await prisma.$transaction((tx) => updateCase(tx, id, payload));
+        return {
+          success: true,
+          message: status === "PUBLISHED" ? "کیس با موفقیت به‌روزرسانی شد" : "پیش‌نویس به‌روزرسانی شد",
+          data: serializeCase(updated),
+        };
+      } catch (error) {
+        getLogger().error(
+          {
+            event: "case.update.failed",
+            userId: resolved.id,
+            caseId: id,
+            err: serializeCaughtError(error),
+          },
+          "Case update failed",
+        );
+        return handleActionError(error);
+      }
+    },
+  );
 }

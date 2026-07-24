@@ -19,7 +19,7 @@ import {
   type StreakResult,
   type XpResult,
 } from "@/lib/quiz";
-import { runWithRequestId } from "@/lib/request-context";
+import { withServerAction } from "@/lib/server-action";
 
 async function resolveUserId(): Promise<string | null> {
   const user = await getSessionUser();
@@ -100,19 +100,16 @@ export async function submitQuizAction(
     return { success: false, message: "برای شرکت در آزمون باید وارد شوید" };
   }
 
-  return runWithRequestId(async () => {
+  return withServerAction(
+    {
+      operation: "quiz-submit",
+      userId,
+      input: { caseId, timeSpent, answerCount: Object.keys(answers).length },
+    },
+    async () => {
     const logger = getLogger();
 
     try {
-      logger.info(
-        {
-          event: "quiz.submit.start",
-          userId,
-          caseId,
-        },
-        "Quiz submission started",
-      );
-
       const kase = await prisma.case.findUnique({
         where: { id: caseId },
         include: {
@@ -283,13 +280,17 @@ export async function submitQuizAction(
           event: "quiz.submit.failed",
           userId,
           caseId,
-          errorType: error instanceof Error ? error.name : "UnknownError",
+          err:
+            error instanceof Error
+              ? { name: error.name, message: error.message, stack: error.stack }
+              : { message: "UnknownError" },
         },
         "Quiz submission failed",
       );
       return handleQuizActionError(error);
     }
-  }, { operation: "quiz-submit", userId });
+  },
+  );
 }
 
 export async function submitReviewQuizAction(
@@ -306,19 +307,16 @@ export async function submitReviewQuizAction(
     return { success: false, message: "سوالی برای مرور انتخاب نشده است" };
   }
 
-  return runWithRequestId(async () => {
+  return withServerAction(
+    {
+      operation: "quiz-review-submit",
+      userId,
+      input: { questionCount: questionIds.length, timeSpent },
+    },
+    async () => {
     const logger = getLogger();
 
     try {
-      logger.info(
-        {
-          event: "quiz.review.submit.start",
-          userId,
-          questionCount: questionIds.length,
-        },
-        "Review quiz submission started",
-      );
-
       const pendingMistakes = await prisma.questionMistake.findMany({
         where: {
           userId,
@@ -435,11 +433,15 @@ export async function submitReviewQuizAction(
           event: "quiz.review.submit.failed",
           userId,
           questionCount: questionIds.length,
-          errorType: error instanceof Error ? error.name : "UnknownError",
+          err:
+            error instanceof Error
+              ? { name: error.name, message: error.message, stack: error.stack }
+              : { message: "UnknownError" },
         },
         "Review quiz submission failed",
       );
       return handleQuizActionError(error);
     }
-  }, { operation: "quiz-review-submit", userId });
+  },
+  );
 }

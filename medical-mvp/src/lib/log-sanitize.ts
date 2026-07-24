@@ -3,22 +3,34 @@ const TRUNCATED_SUFFIX = "...[truncated]";
 
 const SENSITIVE_KEYS = new Set([
   "email",
-  "studentFirstName",
+  "studentfirstname",
   "prompt",
-  "systemInstruction",
-  "chiefComplaint",
-  "patientInfo",
+  "systeminstruction",
+  "chiefcomplaint",
+  "patientinfo",
   "symptoms",
   "diagnosis",
   "answers",
-  "htmlBody",
+  "htmlbody",
   "html",
   "password",
   "token",
-  "apiKey",
+  "apikey",
+  "secret",
+  "authorization",
+  "nextauthsecret",
+  "cookie",
+  "session",
+  "credentials",
+  "accesstoken",
+  "refreshtoken",
 ]);
 
-const NAME_KEYS = new Set(["name", "studentFirstName"]);
+const NAME_KEYS = new Set(["name", "studentfirstname"]);
+
+function normalizeKey(key: string): string {
+  return key.toLowerCase().replace(/[_-]/g, "");
+}
 
 const RAW_OUTPUT_MAX_LENGTH = 2000;
 const DEFAULT_STRING_MAX_LENGTH = 500;
@@ -48,20 +60,22 @@ function sanitizeValue(key: string | undefined, value: unknown, parentHasUserId:
     return value;
   }
 
+  const normalizedKey = key ? normalizeKey(key) : undefined;
+
   if (typeof value === "string") {
-    if (key === "email") {
+    if (normalizedKey === "email") {
       return maskEmail(value);
     }
 
-    if (key === "rawModelOutput") {
+    if (normalizedKey === "rawmodeloutput") {
       return truncateString(value, RAW_OUTPUT_MAX_LENGTH);
     }
 
-    if (key && SENSITIVE_KEYS.has(key)) {
+    if (normalizedKey && SENSITIVE_KEYS.has(normalizedKey)) {
       return REDACTED;
     }
 
-    if (key && NAME_KEYS.has(key) && parentHasUserId) {
+    if (normalizedKey && NAME_KEYS.has(normalizedKey) && parentHasUserId) {
       return REDACTED;
     }
 
@@ -69,14 +83,14 @@ function sanitizeValue(key: string | undefined, value: unknown, parentHasUserId:
       return truncateString(value, DEFAULT_STRING_MAX_LENGTH);
     }
 
-    if (key && !SENSITIVE_KEYS.has(key) && value.length > DEFAULT_STRING_MAX_LENGTH) {
+    if (key && (!normalizedKey || !SENSITIVE_KEYS.has(normalizedKey)) && value.length > DEFAULT_STRING_MAX_LENGTH) {
       return truncateString(value, DEFAULT_STRING_MAX_LENGTH);
     }
 
     return value;
   }
 
-  if (key && SENSITIVE_KEYS.has(key)) {
+  if (normalizedKey && SENSITIVE_KEYS.has(normalizedKey)) {
     return REDACTED;
   }
 

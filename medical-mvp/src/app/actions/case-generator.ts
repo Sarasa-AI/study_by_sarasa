@@ -2,7 +2,7 @@
 
 import { Prisma, Role } from "@prisma/client";
 import { z, type ZodError } from "zod";
-import { generateCaseWithAI } from "@/lib/ai-case-generator";
+import { generateCaseWithAI, generateCaseWithRAG } from "@/lib/ai-case-generator";
 import {
   buildPatientInfoFromAi,
   mapAiCaseToFormValues,
@@ -19,8 +19,18 @@ import {
 } from "@/lib/case-schema";
 import { createCase, serializeCase } from "@/lib/case-service";
 import { getSessionUser } from "@/lib/auth";
+import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { runWithRequestId } from "@/lib/request-context";
+import { withServerAction } from "@/lib/server-action";
+
+function urlOrDoiFromMetadata(metadata: Prisma.JsonValue): string | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+  const record = metadata as Record<string, unknown>;
+  const value = record.urlOrDoi ?? record.url ?? record.doi;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
 
 export type CaseGenerationResult = CaseActionResult & {
   data?: {
@@ -37,6 +47,13 @@ async function resolveSystemInstructorId(): Promise<string | null> {
     orderBy: { createdAt: "asc" },
   });
   return instructor?.id ?? null;
+}
+
+function serializeCaughtError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message, stack: error.stack };
+  }
+  return { message: "UnknownError" };
 }
 
 function handleGenerationError(error: unknown): CaseGenerationResult {
@@ -102,77 +119,211 @@ export async function generateClinicalCaseAction(
   isRemedial = false,
   persist = false,
 ): Promise<CaseGenerationResult> {
-  return runWithRequestId(async () => {
-    const sessionUser = await getSessionUser();
-    if (!sessionUser) {
-      return { success: false, message: "برای تولید کیس باید وارد شوید" };
-    }
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
+    return { success: false, message: "برای تولید کیس باید وارد شوید" };
+  }
 
-    if (!isRemedial && sessionUser.role !== Role.INSTRUCTOR) {
-      return { success: false, message: "فقط استادان می‌توانند کیس تولید کنند" };
-    }
+  if (!isRemedial && sessionUser.role !== Role.INSTRUCTOR) {
+    return { success: false, message: "فقط استادان می‌توانند کیس تولید کنند" };
+  }
 
-    const trimmedCategoryId = categoryId?.trim();
-    if (!trimmedCategoryId) {
-      return { success: false, message: "دسته‌بندی الزامی است" };
-    }
-
-    const shouldPersist = isRemedial || persist;
-
-    try {
-      if (isRemedial) {
-        const isWeak = await isCategoryWeakForUser(sessionUser.id, trimmedCategoryId);
-        if (!isWeak) {
-          return { success: false, message: "این دسته‌بندی در لیست نقاط ضعف شما نیست" };
-        }
-      }
-
-      const category = await prisma.category.findUnique({
-        where: { id: trimmedCategoryId },
-        select: { id: true, name: true },
-      });
-      if (!category) {
-        return { success: false, message: "دسته‌بندی یافت نشد" };
-      }
-
-      let caseOwnerId: string | null = null;
-      if (shouldPersist) {
-        caseOwnerId = isRemedial
-          ? await resolveSystemInstructorId()
-          : sessionUser.id;
-        if (!caseOwnerId) {
-          return { success: false, message: "حساب استاد سیستمی برای ذخیره کیس یافت نشد" };
-        }
-      }
-
-      const aiData = await generateCaseWithAI({
-        topic: topic?.trim() ?? "",
-        categoryName: category.name,
-        questionCount: 1,
+  return withServerAction(
+    {
+      operation: "case-generation",
+      userId: sessionUser.id,
+      input: {
+        categoryId,
         isRemedial,
-      });
+        persist,
+        topicLength: topic?.length ?? 0,
+      },
+    },
+    async () => {
+      const trimmedCategoryId = categoryId?.trim();
+      if (!trimmedCategoryId) {
+        return { success: false, message: "دسته‌بندی الزامی است" };
+      }
 
-      const formValues = mapAiCaseToFormValues(aiData, category.id);
+      const shouldPersist = isRemedial || persist;
 
-      if (!shouldPersist) {
+      try {
+        if (isRemedial) {
+          const isWeak = await isCategoryWeakForUser(sessionUser.id, trimmedCategoryId);
+          if (!isWeak) {
+            return { success: false, message: "این دسته‌بندی در لیست نقاط ضعف شما نیست" };
+          }
+        }
+
+        const category = await prisma.category.findUnique({
+          where: { id: trimmedCategoryId },
+          select: { id: true, name: true },
+        });
+        if (!category) {
+          return { success: false, message: "دسته‌بندی یافت نشد" };
+        }
+
+        let caseOwnerId: string | null = null;
+        if (shouldPersist) {
+          caseOwnerId = isRemedial
+            ? await resolveSystemInstructorId()
+            : sessionUser.id;
+          if (!caseOwnerId) {
+            return { success: false, message: "حساب استاد سیستمی برای ذخیره کیس یافت نشد" };
+          }
+        }
+
+        const aiData = await generateCaseWithAI({
+          topic: topic?.trim() ?? "",
+          categoryName: category.name,
+          questionCount: 1,
+          isRemedial,
+        });
+
+        const formValues = mapAiCaseToFormValues(aiData, category.id);
+
+        if (!shouldPersist) {
+          return {
+            success: true,
+            message: "کیس با موفقیت تولید شد؛ پیش از ذخیره بررسی کنید",
+            data: { formValues },
+          };
+        }
+
+        const status: CaseStatusValue = isRemedial ? "PUBLISHED" : "DRAFT";
+        const payload = toCasePayload(aiData, category.id, caseOwnerId!, status);
+        const created = await prisma.$transaction((tx) => createCase(tx, payload));
+
         return {
           success: true,
-          message: "کیس با موفقیت تولید شد؛ پیش از ذخیره بررسی کنید",
-          data: { formValues },
+          message: isRemedial ? "کیس تمرین هدفمند آماده شد" : "کیس به‌صورت پیش‌نویس ذخیره شد",
+          data: { case: serializeCase(created), formValues, caseId: created.id },
         };
+      } catch (error) {
+        getLogger().error(
+          {
+            event: "case.generation.failed",
+            userId: sessionUser.id,
+            err: serializeCaughtError(error),
+          },
+          "Clinical case generation failed",
+        );
+        return handleGenerationError(error);
+      }
+    },
+  );
+}
+
+/**
+ * Instructor-only RAG case generation. Retrieves clinical KB chunks, grounds the
+ * model, persists the case (when requested), and creates Citation rows from
+ * authoritative retrieved sources — not free-form model text.
+ */
+export async function generateClinicalCaseWithRAGAction(
+  categoryId: string,
+  topic: string,
+  persist = true,
+): Promise<CaseGenerationResult> {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
+    return { success: false, message: "برای تولید کیس باید وارد شوید" };
+  }
+
+  if (sessionUser.role !== Role.INSTRUCTOR) {
+    return { success: false, message: "فقط استادان می‌توانند کیس مبتنی بر RAG تولید کنند" };
+  }
+
+  return withServerAction(
+    {
+      operation: "case.generate.rag",
+      userId: sessionUser.id,
+      input: {
+        categoryId,
+        persist,
+        topicLength: topic?.length ?? 0,
+      },
+    },
+    async () => {
+      const trimmedCategoryId = categoryId?.trim();
+      const trimmedTopic = topic?.trim();
+      if (!trimmedCategoryId) {
+        return { success: false, message: "دسته‌بندی الزامی است" };
+      }
+      if (!trimmedTopic) {
+        return { success: false, message: "موضوع (topic) برای تولید RAG الزامی است" };
       }
 
-      const status: CaseStatusValue = isRemedial ? "PUBLISHED" : "DRAFT";
-      const payload = toCasePayload(aiData, category.id, caseOwnerId!, status);
-      const created = await prisma.$transaction((tx) => createCase(tx, payload));
+      try {
+        const category = await prisma.category.findUnique({
+          where: { id: trimmedCategoryId },
+          select: { id: true, name: true },
+        });
+        if (!category) {
+          return { success: false, message: "دسته‌بندی یافت نشد" };
+        }
 
-      return {
-        success: true,
-        message: isRemedial ? "کیس تمرین هدفمند آماده شد" : "کیس به‌صورت پیش‌نویس ذخیره شد",
-        data: { case: serializeCase(created), formValues, caseId: created.id },
-      };
-    } catch (error) {
-      return handleGenerationError(error);
-    }
-  }, { operation: "case-generation" });
+        const ragResult = await generateCaseWithRAG({
+          topic: trimmedTopic,
+          categoryName: category.name,
+          questionCount: 1,
+        });
+
+        const formValues = mapAiCaseToFormValues(ragResult.case, category.id);
+
+        if (!persist) {
+          return {
+            success: true,
+            message: "کیس RAG با موفقیت تولید شد؛ پیش از ذخیره بررسی کنید",
+            data: { formValues },
+          };
+        }
+
+        const payload = toCasePayload(ragResult.case, category.id, sessionUser.id, "DRAFT");
+
+        const created = await prisma.$transaction(async (tx) => {
+          const kase = await createCase(tx, payload);
+
+          const citationsBySource = new Map<string, string | null>();
+          for (const source of ragResult.citationSources) {
+            if (!citationsBySource.has(source)) {
+              citationsBySource.set(source, null);
+            }
+          }
+          for (const doc of ragResult.retrievedDocuments) {
+            if (!citationsBySource.has(doc.source)) continue;
+            if (citationsBySource.get(doc.source)) continue;
+            citationsBySource.set(doc.source, urlOrDoiFromMetadata(doc.metadata));
+          }
+
+          if (citationsBySource.size > 0) {
+            await tx.citation.createMany({
+              data: [...citationsBySource.entries()].map(([text, urlOrDoi]) => ({
+                text,
+                urlOrDoi,
+                caseId: kase.id,
+              })),
+            });
+          }
+
+          return kase;
+        });
+
+        return {
+          success: true,
+          message: "کیس RAG با استناد ذخیره شد",
+          data: { case: serializeCase(created), formValues, caseId: created.id },
+        };
+      } catch (error) {
+        getLogger().error(
+          {
+            event: "case.generation.rag.failed",
+            userId: sessionUser.id,
+            err: serializeCaughtError(error),
+          },
+          "RAG clinical case generation failed",
+        );
+        return handleGenerationError(error);
+      }
+    },
+  );
 }

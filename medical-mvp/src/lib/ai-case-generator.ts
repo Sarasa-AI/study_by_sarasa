@@ -2,9 +2,16 @@ import { z } from "zod";
 import { generateStructuredData } from "@/lib/ai";
 import {
   aiCaseGenerationSchema,
+  aiRagCaseGenerationSchema,
   normalizeAiCaseGeneration,
+  normalizeAiRagCaseGeneration,
   type AiCaseGeneration,
+  type AiRagCaseGeneration,
 } from "@/lib/ai-schemas";
+import {
+  similaritySearch,
+  type ClinicalDocumentMatch,
+} from "@/lib/rag/vector-store";
 
 export type CaseDifficulty = "EASY" | "MEDIUM" | "HARD";
 
@@ -14,6 +21,21 @@ export type GenerateCaseWithAIInput = {
   difficulty?: CaseDifficulty;
   questionCount?: number;
   isRemedial?: boolean;
+};
+
+export type GenerateCaseWithRAGInput = {
+  topic: string;
+  categoryName: string;
+  difficulty?: CaseDifficulty;
+  questionCount?: number;
+  retrievalLimit?: number;
+};
+
+export type GenerateCaseWithRAGResult = {
+  case: AiRagCaseGeneration;
+  retrievedDocuments: ClinicalDocumentMatch[];
+  /** Authoritative source strings from the vector store (Tier 0 citations). */
+  citationSources: string[];
 };
 
 const SYSTEM_INSTRUCTION = [
@@ -81,6 +103,75 @@ function buildClinicalPrompt(params: {
   return lines.join("\n");
 }
 
+function buildRagContext(documents: ClinicalDocumentMatch[]): string {
+  return documents
+    .map((doc, index) => {
+      return [
+        `--- Context ${index + 1} ---`,
+        `source: ${doc.source}`,
+        `title: ${doc.title}`,
+        doc.content,
+      ].join("\n");
+    })
+    .join("\n\n");
+}
+
+function buildRagSystemInstruction(documents: ClinicalDocumentMatch[]): string {
+  const allowedSources = [...new Set(documents.map((d) => d.source))];
+  const context = buildRagContext(documents);
+
+  return [
+    "You are a pediatric board examiner.",
+    "Base your clinical case ONLY on the following context.",
+    "Do not hallucinate. Do not invent facts, labs, doses, or guidelines that are not supported by the context.",
+    "If the context is incomplete for a detail, keep that detail general and clinically safe rather than inventing specifics.",
+    `Set referenceText to exactly one of these source strings (copy verbatim): ${JSON.stringify(allowedSources)}.`,
+    "",
+    "CONTEXT:",
+    context,
+    "",
+    SYSTEM_INSTRUCTION,
+  ].join("\n");
+}
+
+function enforceQuestionCount<T extends { questions: unknown[] }>(
+  normalized: T,
+  questionCount: number,
+): T {
+  if (normalized.questions.length > questionCount) {
+    return {
+      ...normalized,
+      questions: normalized.questions.slice(0, questionCount),
+    };
+  }
+
+  if (normalized.questions.length < questionCount) {
+    throw new Error(
+      `AI returned ${normalized.questions.length} question(s); expected ${questionCount}`,
+    );
+  }
+
+  return normalized;
+}
+
+/**
+ * Resolve authoritative citation sources from retrieved docs.
+ * Prefer a retrieved source that matches model referenceText; otherwise use all unique retrieved sources.
+ */
+export function resolveCitationSources(
+  documents: ClinicalDocumentMatch[],
+  referenceText: string,
+): string[] {
+  const uniqueSources = [...new Set(documents.map((d) => d.source).filter(Boolean))];
+  if (uniqueSources.length === 0) return [];
+
+  const matched = uniqueSources.find((source) => source === referenceText.trim());
+  if (matched) return [matched];
+
+  // Tier 0: never trust an unmatched model citation — fall back to retrieved sources.
+  return uniqueSources;
+}
+
 export async function generateCaseWithAI(input: GenerateCaseWithAIInput): Promise<AiCaseGeneration> {
   const questionCount = clampQuestionCount(input.questionCount);
   const isRemedial = Boolean(input.isRemedial);
@@ -99,19 +190,58 @@ export async function generateCaseWithAI(input: GenerateCaseWithAIInput): Promis
   });
 
   const normalized = normalizeAiCaseGeneration(raw as z.infer<typeof aiCaseGenerationSchema>);
+  return enforceQuestionCount(normalized, questionCount);
+}
 
-  if (normalized.questions.length > questionCount) {
-    return {
-      ...normalized,
-      questions: normalized.questions.slice(0, questionCount),
-    };
+/**
+ * Grounded case generation: retrieve clinical chunks, inject into the system prompt,
+ * and require referenceText. Refuses to generate when the vector store has no matches.
+ */
+export async function generateCaseWithRAG(
+  input: GenerateCaseWithRAGInput,
+): Promise<GenerateCaseWithRAGResult> {
+  const topic = input.topic.trim();
+  if (!topic) {
+    throw new Error("topic is required for RAG case generation");
   }
 
-  if (normalized.questions.length < questionCount) {
+  const questionCount = clampQuestionCount(input.questionCount);
+  const retrievalLimit = input.retrievalLimit ?? 3;
+
+  const retrievedDocuments = await similaritySearch(topic, retrievalLimit);
+  if (retrievedDocuments.length === 0) {
     throw new Error(
-      `AI returned ${normalized.questions.length} question(s); expected ${questionCount}`,
+      "No clinical documents matched this topic. Ingest knowledge-base content before using RAG generation.",
     );
   }
 
-  return normalized;
+  const raw = await generateStructuredData({
+    operation: "case-generation",
+    schema: aiRagCaseGenerationSchema,
+    systemInstruction: buildRagSystemInstruction(retrievedDocuments),
+    prompt: buildClinicalPrompt({
+      categoryName: input.categoryName,
+      topic,
+      questionCount,
+      difficulty: input.difficulty,
+      isRemedial: false,
+    }),
+  });
+
+  const normalized = enforceQuestionCount(
+    normalizeAiRagCaseGeneration(raw as z.infer<typeof aiRagCaseGenerationSchema>),
+    questionCount,
+  );
+
+  const citationSources = resolveCitationSources(retrievedDocuments, normalized.referenceText);
+
+  return {
+    case: {
+      ...normalized,
+      // Align model output with authoritative retrieved source when possible.
+      referenceText: citationSources[0] ?? normalized.referenceText,
+    },
+    retrievedDocuments,
+    citationSources,
+  };
 }

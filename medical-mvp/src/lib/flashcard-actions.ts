@@ -7,7 +7,8 @@ import {
   type FlashcardRating,
 } from "@/lib/flashcard-service";
 import { checkAndAwardAchievements, type AchievementUnlock } from "@/lib/gamification-service";
-import { runWithRequestId } from "@/lib/request-context";
+import { getLogger } from "@/lib/logger";
+import { withServerAction } from "@/lib/server-action";
 
 const ratingSchema = z.enum(["again", "hard", "good", "easy"]);
 
@@ -17,34 +18,57 @@ export type FlashcardActionResult = {
   newAchievements?: AchievementUnlock[];
 };
 
+function serializeCaughtError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message, stack: error.stack };
+  }
+  return { message: "UnknownError" };
+}
+
 export async function submitFlashcardReviewAction(
   flashcardId: string,
   rating: FlashcardRating,
 ): Promise<FlashcardActionResult> {
-  return runWithRequestId(async () => {
-    const user = await getSessionUser();
-    if (!user?.id) {
-      return { success: false, message: "برای ثبت مرور باید وارد شوید" };
-    }
+  const user = await getSessionUser();
+  if (!user?.id) {
+    return { success: false, message: "برای ثبت مرور باید وارد شوید" };
+  }
 
-    const parsedRating = ratingSchema.safeParse(rating);
-    if (!flashcardId || !parsedRating.success) {
-      return { success: false, message: "اطلاعات مرور معتبر نیست" };
-    }
-
-    try {
-      await submitCardReview(user.id, flashcardId, parsedRating.data);
-      const newAchievements = await checkAndAwardAchievements(user.id);
-      return {
-        success: true,
-        message: "مرور ثبت شد",
-        newAchievements: newAchievements.length > 0 ? newAchievements : undefined,
-      };
-    } catch (error) {
-      if (error instanceof Error && error.message === "FLASHCARD_NOT_FOUND") {
-        return { success: false, message: "فلش‌کارت یافت نشد" };
+  return withServerAction(
+    {
+      operation: "flashcard-review",
+      userId: user.id,
+      input: { flashcardId, rating },
+    },
+    async () => {
+      const parsedRating = ratingSchema.safeParse(rating);
+      if (!flashcardId || !parsedRating.success) {
+        return { success: false, message: "اطلاعات مرور معتبر نیست" };
       }
-      return { success: false, message: "خطا در ثبت مرور فلش‌کارت" };
-    }
-  });
+
+      try {
+        await submitCardReview(user.id, flashcardId, parsedRating.data);
+        const newAchievements = await checkAndAwardAchievements(user.id);
+        return {
+          success: true,
+          message: "مرور ثبت شد",
+          newAchievements: newAchievements.length > 0 ? newAchievements : undefined,
+        };
+      } catch (error) {
+        getLogger().error(
+          {
+            event: "flashcard.review.failed",
+            userId: user.id,
+            flashcardId,
+            err: serializeCaughtError(error),
+          },
+          "Flashcard review failed",
+        );
+        if (error instanceof Error && error.message === "FLASHCARD_NOT_FOUND") {
+          return { success: false, message: "فلش‌کارت یافت نشد" };
+        }
+        return { success: false, message: "خطا در ثبت مرور فلش‌کارت" };
+      }
+    },
+  );
 }

@@ -17,7 +17,7 @@ import {
   type StreakResult,
   type XpResult,
 } from "@/lib/quiz";
-import { runWithRequestId } from "@/lib/request-context";
+import { withServerAction } from "@/lib/server-action";
 
 const QUESTION_COUNTS = [10, 20, 50] as const;
 const TIME_PRESETS = [15, 30, 60] as const;
@@ -132,7 +132,18 @@ export async function startExamAction(input: {
     return { success: false, message: "برای شرکت در آزمون باید وارد شوید" };
   }
 
-  return runWithRequestId(async () => {
+  return withServerAction(
+    {
+      operation: "exam-start",
+      userId: user.id,
+      input: {
+        questionCount: input.questionCount,
+        categoryIds: input.categoryIds,
+        timeLimitMinutes: input.timeLimitMinutes,
+        usePerQuestionTime: input.usePerQuestionTime,
+      },
+    },
+    async () => {
     const logger = getLogger();
 
     try {
@@ -190,13 +201,17 @@ export async function startExamAction(input: {
         {
           event: "exam.start.failed",
           userId: user.id,
-          errorType: error instanceof Error ? error.name : "UnknownError",
+          err:
+            error instanceof Error
+              ? { name: error.name, message: error.message, stack: error.stack }
+              : { message: "UnknownError" },
         },
         "Exam start failed",
       );
       return handleExamActionError(error);
     }
-  }, { operation: "exam-start", userId: user.id });
+  },
+  );
 }
 
 export async function submitExamAction(
@@ -215,19 +230,16 @@ export async function submitExamAction(
 
   const userId = user.id;
 
-  return runWithRequestId(async () => {
+  return withServerAction(
+    {
+      operation: "exam-submit",
+      userId,
+      input: { questionCount: questionIds.length, timeSpent },
+    },
+    async () => {
     const logger = getLogger();
 
     try {
-      logger.info(
-        {
-          event: "exam.submit.start",
-          userId,
-          questionCount: questionIds.length,
-        },
-        "Exam submission started",
-      );
-
       const uniqueIds = [...new Set(questionIds)];
       if (uniqueIds.length !== questionIds.length) {
         return { success: false, message: "شناسه سؤالات معتبر نیست" };
@@ -339,11 +351,15 @@ export async function submitExamAction(
           event: "exam.submit.failed",
           userId,
           questionCount: questionIds.length,
-          errorType: error instanceof Error ? error.name : "UnknownError",
+          err:
+            error instanceof Error
+              ? { name: error.name, message: error.message, stack: error.stack }
+              : { message: "UnknownError" },
         },
         "Exam submission failed",
       );
       return handleExamActionError(error);
     }
-  }, { operation: "exam-submit", userId });
+  },
+  );
 }

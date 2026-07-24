@@ -1,8 +1,12 @@
+import path from "node:path";
+import { createRequire } from "node:module";
 import pino from "pino";
 import { sanitizeLogContext } from "@/lib/log-sanitize";
 import { getRequestContext } from "@/lib/request-context";
 
 const isProduction = process.env.NODE_ENV === "production";
+const logLevel = process.env.LOG_LEVEL ?? (isProduction ? "info" : "debug");
+const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
 
 export type AppLogger = {
   debug: (obj: Record<string, unknown>, msg?: string) => void;
@@ -12,23 +16,39 @@ export type AppLogger = {
   child: (bindings: Record<string, unknown>) => AppLogger;
 };
 
-const rootPino = pino({
-  level: process.env.LOG_LEVEL ?? (isProduction ? "info" : "debug"),
+const baseOptions = {
+  level: logLevel,
   base: {
     service: "medical-mvp",
   },
-  ...(isProduction
-    ? {}
-    : {
-        transport: {
-          target: "pino-pretty",
-          options: {
-            colorize: true,
-            translateTime: "SYS:standard",
-          },
+} as const;
+
+function createRootPino(): pino.Logger {
+  if (isProduction) {
+    return pino(baseOptions);
+  }
+
+  try {
+    // Absolute path so the worker thread can load pino-pretty outside Webpack.
+    const prettyTarget = nodeRequire.resolve("pino-pretty");
+
+    return pino({
+      ...baseOptions,
+      transport: {
+        target: prettyTarget,
+        options: {
+          colorize: true,
+          translateTime: "SYS:standard",
         },
-      }),
-});
+      },
+    });
+  } catch {
+    // Webpack / bundlers often break pino worker transports; fall back to plain JSON.
+    return pino(baseOptions);
+  }
+}
+
+const rootPino = createRootPino();
 
 function mergeContext(bindings?: Record<string, unknown>): Record<string, unknown> {
   const store = getRequestContext();

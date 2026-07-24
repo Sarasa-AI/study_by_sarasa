@@ -70,11 +70,30 @@ export type AiCaseGeneration = {
   questions: z.infer<typeof aiCaseQuestionSchema>[];
 };
 
+/** RAG-grounded case schema — requires an exact source citation string. */
+export const aiRagCaseGenerationSchema = aiCaseGenerationSchema.extend({
+  referenceText: z.string().trim().min(1, "منبع استناد (referenceText) الزامی است"),
+});
+
+export type AiRagCaseGeneration = AiCaseGeneration & {
+  referenceText: string;
+};
+
 export function normalizeAiCaseGeneration(data: z.infer<typeof aiCaseGenerationSchema>): AiCaseGeneration {
   return {
     ...data,
     labResults: data.labResults ?? "",
     imaging: data.imaging ?? "",
+  };
+}
+
+export function normalizeAiRagCaseGeneration(
+  data: z.infer<typeof aiRagCaseGenerationSchema>,
+): AiRagCaseGeneration {
+  const base = normalizeAiCaseGeneration(data);
+  return {
+    ...base,
+    referenceText: data.referenceText.trim(),
   };
 }
 

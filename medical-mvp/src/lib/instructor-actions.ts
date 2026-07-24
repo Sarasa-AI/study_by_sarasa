@@ -11,8 +11,9 @@ import {
   formatZodError,
 } from "@/lib/case-schema";
 import { getSessionUser } from "@/lib/auth";
+import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { runWithRequestId } from "@/lib/request-context";
+import { withServerAction } from "@/lib/server-action";
 
 export type GenerateAICaseActionInput = {
   topic: string;
@@ -26,6 +27,13 @@ export type GenerateAICaseActionResult = CaseActionResult & {
     formValues?: CaseFormValues;
   };
 };
+
+function serializeCaughtError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message, stack: error.stack };
+  }
+  return { message: "UnknownError" };
+}
 
 function handleGenerationError(error: unknown): GenerateAICaseActionResult {
   if (error instanceof z.ZodError) {
@@ -47,50 +55,70 @@ function handleGenerationError(error: unknown): GenerateAICaseActionResult {
 export async function generateAICaseAction(
   input: GenerateAICaseActionInput,
 ): Promise<GenerateAICaseActionResult> {
-  return runWithRequestId(async () => {
-    const sessionUser = await getSessionUser();
-    if (!sessionUser) {
-      return { success: false, message: "برای تولید کیس باید وارد شوید" };
-    }
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
+    return { success: false, message: "برای تولید کیس باید وارد شوید" };
+  }
 
-    if (sessionUser.role !== Role.INSTRUCTOR) {
-      return { success: false, message: "فقط استادان می‌توانند کیس تولید کنند" };
-    }
+  if (sessionUser.role !== Role.INSTRUCTOR) {
+    return { success: false, message: "فقط استادان می‌توانند کیس تولید کنند" };
+  }
 
-    const topic = input.topic?.trim() ?? "";
-    if (!topic) {
-      return { success: false, message: "موضوع یا سناریوی بالینی الزامی است" };
-    }
-
-    const categoryId = input.categoryId?.trim() ?? "";
-    if (!categoryId) {
-      return { success: false, message: "دسته‌بندی الزامی است" };
-    }
-
-    try {
-      const category = await prisma.category.findUnique({
-        where: { id: categoryId },
-        select: { id: true, name: true },
-      });
-      if (!category) {
-        return { success: false, message: "دسته‌بندی یافت نشد" };
-      }
-
-      const aiData = await generateCaseWithAI({
-        topic,
-        categoryName: category.name,
+  return withServerAction(
+    {
+      operation: "case-generation",
+      userId: sessionUser.id,
+      input: {
+        categoryId: input.categoryId,
         difficulty: input.difficulty,
         questionCount: input.questionCount,
-        isRemedial: false,
-      });
+        topicLength: input.topic?.length ?? 0,
+      },
+    },
+    async () => {
+      const topic = input.topic?.trim() ?? "";
+      if (!topic) {
+        return { success: false, message: "موضوع یا سناریوی بالینی الزامی است" };
+      }
 
-      return {
-        success: true,
-        message: "کیس با موفقیت تولید شد؛ پیش از ذخیره بررسی کنید",
-        data: { formValues: mapAiCaseToFormValues(aiData, category.id) },
-      };
-    } catch (error) {
-      return handleGenerationError(error);
-    }
-  }, { operation: "case-generation" });
+      const categoryId = input.categoryId?.trim() ?? "";
+      if (!categoryId) {
+        return { success: false, message: "دسته‌بندی الزامی است" };
+      }
+
+      try {
+        const category = await prisma.category.findUnique({
+          where: { id: categoryId },
+          select: { id: true, name: true },
+        });
+        if (!category) {
+          return { success: false, message: "دسته‌بندی یافت نشد" };
+        }
+
+        const aiData = await generateCaseWithAI({
+          topic,
+          categoryName: category.name,
+          difficulty: input.difficulty,
+          questionCount: input.questionCount,
+          isRemedial: false,
+        });
+
+        return {
+          success: true,
+          message: "کیس با موفقیت تولید شد؛ پیش از ذخیره بررسی کنید",
+          data: { formValues: mapAiCaseToFormValues(aiData, category.id) },
+        };
+      } catch (error) {
+        getLogger().error(
+          {
+            event: "case.generation.failed",
+            userId: sessionUser.id,
+            err: serializeCaughtError(error),
+          },
+          "AI case generation failed",
+        );
+        return handleGenerationError(error);
+      }
+    },
+  );
 }

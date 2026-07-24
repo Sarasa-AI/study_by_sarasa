@@ -57,4 +57,30 @@ describe("sanitizeLogContext", () => {
 
     expect(sanitized.message).toContain("...[truncated]");
   });
+
+  it("redacts auth and secret fields case-insensitively", () => {
+    const sanitized = sanitizeLogContext({
+      password: "hunter2",
+      token: "abc",
+      apiKey: "key-1",
+      secret: "shh",
+      Authorization: "Bearer xyz",
+      NEXTAUTH_SECRET: "next-secret",
+      cookie: "session=abc",
+      session: { id: "s1" },
+      access_token: "access",
+      refreshToken: "refresh",
+    });
+
+    expect(sanitized.password).toBe("[REDACTED]");
+    expect(sanitized.token).toBe("[REDACTED]");
+    expect(sanitized.apiKey).toBe("[REDACTED]");
+    expect(sanitized.secret).toBe("[REDACTED]");
+    expect(sanitized.Authorization).toBe("[REDACTED]");
+    expect(sanitized.NEXTAUTH_SECRET).toBe("[REDACTED]");
+    expect(sanitized.cookie).toBe("[REDACTED]");
+    expect(sanitized.session).toBe("[REDACTED]");
+    expect(sanitized.access_token).toBe("[REDACTED]");
+    expect(sanitized.refreshToken).toBe("[REDACTED]");
+  });
 });

@@ -5,7 +5,9 @@ import {
   type StudentPerformanceStats,
 } from "@/lib/analytics-service";
 import { getSessionUser } from "@/lib/auth";
+import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { withServerAction } from "@/lib/server-action";
 
 export type DashboardStreak = {
   currentStreak: number;
@@ -30,41 +32,64 @@ async function resolveUserId(): Promise<string | null> {
   return user?.id ?? null;
 }
 
+function serializeCaughtError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message, stack: error.stack };
+  }
+  return { message: "UnknownError" };
+}
+
 export async function getDashboardStatsAction(): Promise<DashboardStatsResult> {
   const userId = await resolveUserId();
   if (!userId) {
     return { success: false, message: "برای مشاهده داشبورد باید وارد شوید" };
   }
 
-  try {
-    const [stats, user, totalCasesCompleted] = await Promise.all([
-      getStudentPerformanceStats(userId),
-      prisma.user.findUniqueOrThrow({
-        where: { id: userId },
-        select: {
-          totalXp: true,
-          currentStreak: true,
-          longestStreak: true,
-          lastQuizCompletedAt: true,
-        },
-      }),
-      prisma.quizResult.count({ where: { userId } }),
-    ]);
+  return withServerAction(
+    {
+      operation: "dashboard-stats",
+      userId,
+    },
+    async () => {
+      try {
+        const [stats, user, totalCasesCompleted] = await Promise.all([
+          getStudentPerformanceStats(userId),
+          prisma.user.findUniqueOrThrow({
+            where: { id: userId },
+            select: {
+              totalXp: true,
+              currentStreak: true,
+              longestStreak: true,
+              lastQuizCompletedAt: true,
+            },
+          }),
+          prisma.quizResult.count({ where: { userId } }),
+        ]);
 
-    return {
-      success: true,
-      data: {
-        ...stats,
-        streak: {
-          currentStreak: user.currentStreak,
-          longestStreak: user.longestStreak,
-          lastQuizCompletedAt: user.lastQuizCompletedAt,
-        },
-        totalXp: user.totalXp,
-        totalCasesCompleted,
-      },
-    };
-  } catch {
-    return { success: false, message: "خطا در بارگذاری آمار داشبورد" };
-  }
+        return {
+          success: true,
+          data: {
+            ...stats,
+            streak: {
+              currentStreak: user.currentStreak,
+              longestStreak: user.longestStreak,
+              lastQuizCompletedAt: user.lastQuizCompletedAt,
+            },
+            totalXp: user.totalXp,
+            totalCasesCompleted,
+          },
+        };
+      } catch (error) {
+        getLogger().error(
+          {
+            event: "dashboard.stats.failed",
+            userId,
+            err: serializeCaughtError(error),
+          },
+          "Dashboard stats failed",
+        );
+        return { success: false, message: "خطا در بارگذاری آمار داشبورد" };
+      }
+    },
+  );
 }

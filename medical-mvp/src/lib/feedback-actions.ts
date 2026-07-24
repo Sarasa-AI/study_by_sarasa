@@ -7,7 +7,8 @@ import {
   submitQuestionFeedback,
   updateFeedbackStatus,
 } from "@/lib/feedback-service";
-import { runWithRequestId } from "@/lib/request-context";
+import { getLogger } from "@/lib/logger";
+import { withServerAction } from "@/lib/server-action";
 
 const reasonSchema = z.nativeEnum(FeedbackReason);
 const reviewStatusSchema = z.enum([
@@ -31,70 +32,111 @@ export type FeedbackActionResult = {
   message: string;
 };
 
+function serializeCaughtError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message, stack: error.stack };
+  }
+  return { message: "UnknownError" };
+}
+
 export async function submitQuestionFeedbackAction(input: {
   questionId: string;
   reason: "TYPO" | "WRONG_ANSWER" | "UNCLEAR_REASONING" | "OTHER";
   comment?: string | null;
 }): Promise<FeedbackActionResult> {
-  return runWithRequestId(async () => {
-    const user = await getSessionUser();
-    if (!user?.id) {
-      return { success: false, message: "برای گزارش اشکال باید وارد شوید" };
-    }
+  const user = await getSessionUser();
+  if (!user?.id) {
+    return { success: false, message: "برای گزارش اشکال باید وارد شوید" };
+  }
 
-    const parsed = submitSchema.safeParse(input);
-    if (!parsed.success) {
-      return { success: false, message: "اطلاعات گزارش معتبر نیست" };
-    }
-
-    try {
-      await submitQuestionFeedback(user.id, {
-        questionId: parsed.data.questionId,
-        reason: parsed.data.reason,
-        comment: parsed.data.comment,
-      });
-      return { success: true, message: "گزارش شما ثبت شد. از همکاری‌تان سپاسگزاریم." };
-    } catch (error) {
-      if (error instanceof Error && error.message === "QUESTION_NOT_FOUND") {
-        return { success: false, message: "سوال یافت نشد" };
+  return withServerAction(
+    {
+      operation: "feedback-submit",
+      userId: user.id,
+      input: {
+        questionId: input.questionId,
+        reason: input.reason,
+        hasComment: Boolean(input.comment?.trim()),
+      },
+    },
+    async () => {
+      const parsed = submitSchema.safeParse(input);
+      if (!parsed.success) {
+        return { success: false, message: "اطلاعات گزارش معتبر نیست" };
       }
-      return { success: false, message: "خطا در ثبت گزارش" };
-    }
-  });
+
+      try {
+        await submitQuestionFeedback(user.id, {
+          questionId: parsed.data.questionId,
+          reason: parsed.data.reason,
+          comment: parsed.data.comment,
+        });
+        return { success: true, message: "گزارش شما ثبت شد. از همکاری‌تان سپاسگزاریم." };
+      } catch (error) {
+        getLogger().error(
+          {
+            event: "feedback.submit.failed",
+            userId: user.id,
+            err: serializeCaughtError(error),
+          },
+          "Feedback submit failed",
+        );
+        if (error instanceof Error && error.message === "QUESTION_NOT_FOUND") {
+          return { success: false, message: "سوال یافت نشد" };
+        }
+        return { success: false, message: "خطا در ثبت گزارش" };
+      }
+    },
+  );
 }
 
 export async function updateFeedbackStatusAction(input: {
   feedbackId: string;
   status: "RESOLVED" | "DISMISSED";
 }): Promise<FeedbackActionResult> {
-  return runWithRequestId(async () => {
-    const user = await getSessionUser();
-    if (!user?.id) {
-      return { success: false, message: "برای بررسی گزارش باید وارد شوید" };
-    }
-    if (user.role !== Role.INSTRUCTOR) {
-      return { success: false, message: "فقط استادان می‌توانند گزارش‌ها را بررسی کنند" };
-    }
+  const user = await getSessionUser();
+  if (!user?.id) {
+    return { success: false, message: "برای بررسی گزارش باید وارد شوید" };
+  }
+  if (user.role !== Role.INSTRUCTOR) {
+    return { success: false, message: "فقط استادان می‌توانند گزارش‌ها را بررسی کنند" };
+  }
 
-    const parsed = updateStatusSchema.safeParse(input);
-    if (!parsed.success) {
-      return { success: false, message: "وضعیت گزارش معتبر نیست" };
-    }
-
-    try {
-      await updateFeedbackStatus(parsed.data.feedbackId, parsed.data.status);
-      return {
-        success: true,
-        message:
-          parsed.data.status === FeedbackStatus.RESOLVED
-            ? "گزارش تایید و رفع شد"
-            : "گزارش رد شد",
-      };
-    } catch (error) {
-      if (error instanceof Error && error.message === "FEEDBACK_NOT_FOUND") {
-        return { success: false, message: "گزارش یافت نشد" };
+  return withServerAction(
+    {
+      operation: "feedback-update-status",
+      userId: user.id,
+      input: { feedbackId: input.feedbackId, status: input.status },
+    },
+    async () => {
+      const parsed = updateStatusSchema.safeParse(input);
+      if (!parsed.success) {
+        return { success: false, message: "وضعیت گزارش معتبر نیست" };
       }
-      return { success: false, message: "خطا در به‌روزرسانی وضعیت گزارش" };
-    }
-  });
+
+      try {
+        await updateFeedbackStatus(parsed.data.feedbackId, parsed.data.status);
+        return {
+          success: true,
+          message:
+            parsed.data.status === FeedbackStatus.RESOLVED
+              ? "گزارش تایید و رفع شد"
+              : "گزارش رد شد",
+        };
+      } catch (error) {
+        getLogger().error(
+          {
+            event: "feedback.update_status.failed",
+            userId: user.id,
+            err: serializeCaughtError(error),
+          },
+          "Feedback status update failed",
+        );
+        if (error instanceof Error && error.message === "FEEDBACK_NOT_FOUND") {
+          return { success: false, message: "گزارش یافت نشد" };
+        }
+        return { success: false, message: "خطا در به‌روزرسانی وضعیت گزارش" };
+      }
+    },
+  );
 }

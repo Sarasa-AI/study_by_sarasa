@@ -64,6 +64,8 @@ async function main() {
   // Clean up existing data to make seeding idempotent in dev
   await prisma.userAchievement.deleteMany({});
   await prisma.userFlashcardProgress.deleteMany({});
+  await prisma.citation.deleteMany({});
+  await prisma.clinicalDocument.deleteMany({});
   await prisma.flashcard.deleteMany({});
   await prisma.questionMistake.deleteMany({});
   await prisma.quizResult.deleteMany({});
@@ -546,6 +548,7 @@ async function main() {
           "صعود قطعه ST ≥ ۱ mm در دو لید مجاور پره‌کوردیال (V2–V4) همراه با علائم ایسکمی حاد؛ درمان فوری با فعال‌سازی Cath Lab / فیبرینولیز طبق پروتکل.",
         imageUrl: stemi?.mediaUrl ?? "https://res.cloudinary.com/demo/image/upload/v1700000000/stemi.png",
         caption: "الگوی ST elevation در لیدهای قدامی",
+        status: "PUBLISHED",
       },
       {
         caseId: pe?.id ?? createdCases[1]?.id ?? null,
@@ -554,6 +557,7 @@ async function main() {
           "نقص پرشدگی (filling defect) داخل شریان پولمونر؛ همراه با تاکی‌کاردی، هیپوکسی و امتیاز Wells بالا احتمال PE را افزایش می‌دهد.",
         imageUrl: pe?.mediaUrl ?? "https://res.cloudinary.com/demo/image/upload/v1700000000/pe_cta.png",
         caption: "CTA قفسه سینه — filling defect",
+        status: "PUBLISHED",
       },
       {
         caseId: stroke?.id ?? createdCases[2]?.id ?? null,
@@ -562,6 +566,7 @@ async function main() {
           "معمولاً تا ۴٫۵ ساعت از شروع علائم در بیماران واجد شرایط؛ CT بدون کنتراست برای رد خونریزی قبل از ترومبولیز الزامی است.",
         imageUrl: stroke?.mediaUrl ?? "https://res.cloudinary.com/demo/image/upload/v1700000000/ct_stroke.png",
         caption: "CT مغز بدون کنتراست",
+        status: "PUBLISHED",
       },
       {
         caseId: hyperK?.id ?? createdCases[createdCases.length - 1]?.id ?? null,
@@ -570,6 +575,7 @@ async function main() {
           "پایدارسازی غشاء با کلسیم وریدی (کلسیم گلوکونات/کلراید)، سپس شیفت پتاسیم (انسولین+گلوکز، بتاآگونیست) و حذف پتاسیم.",
         imageUrl: hyperK?.mediaUrl ?? "https://res.cloudinary.com/demo/image/upload/v1700000000/hyperkalemia_ekg.png",
         caption: "امواج T نوک‌تیز در هیپرکالمی",
+        status: "PUBLISHED",
       },
       {
         caseId: null,
@@ -578,6 +584,7 @@ async function main() {
           "Airway → Breathing → Circulation؛ همزمان اکسیژن، مانیتورینگ و دسترسی وریدی را برقرار کنید، سپس به علت زمینه‌ای بپردازید.",
         imageUrl: null,
         caption: null,
+        status: "PUBLISHED",
       },
       {
         caseId: createdCases[4]?.id ?? null,
@@ -586,6 +593,7 @@ async function main() {
           "شناسایی سریع مایع آزاد داخل‌صفاقی یا پریکاردیال در بیمار ناپایدار؛ مثبت بودن آن می‌تواند اندیکاسیون لاپاراتومی اورژانس باشد.",
         imageUrl: "https://res.cloudinary.com/demo/image/upload/v1700000000/fast_exam.png",
         caption: "نمای FAST — مایع آزاد",
+        status: "PUBLISHED",
       },
     ],
   });
