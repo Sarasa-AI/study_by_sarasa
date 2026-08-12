@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Flag } from "lucide-react";
 import { submitQuestionFeedbackAction } from "@/lib/feedback-actions";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/Textarea";
+import { useBodyScrollLock } from "@/lib/hooks/useBodyScrollLock";
+import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 const REASON_OPTIONS = [
   { value: "TYPO", label: "تایپو/غلط املایی" },
@@ -34,10 +36,15 @@ export function QuestionFeedbackModal({ questionId }: QuestionFeedbackModalProps
     setError(null);
   }
 
-  function closeModal() {
+  const closeModal = useCallback(() => {
     setOpen(false);
-    resetForm();
-  }
+    setReason("TYPO");
+    setComment("");
+    setError(null);
+  }, []);
+
+  useBodyScrollLock(open);
+  useEscapeKey(closeModal, open);
 
   async function handleSubmit() {
     setIsSubmitting(true);

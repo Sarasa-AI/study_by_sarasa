@@ -21,6 +21,9 @@ export default async function InstructorPage() {
           <Link href="/instructor/feedback">
             <Button variant="secondary">گزارش‌های خطا</Button>
           </Link>
+          <Link href="/instructor/knowledge">
+            <Button variant="secondary">پایگاه دانش</Button>
+          </Link>
           <Link href="/instructor/cases/ai-generate">
             <Button variant="secondary">تولید کیس با AI</Button>
           </Link>

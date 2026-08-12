@@ -45,7 +45,7 @@ export default async function AnalyticsPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">
+            <div className="text-3xl font-bold tabular-nums">
               {overview.totalQuestionsAnswered.toLocaleString("fa-IR")}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">سوال پاسخ‌داده‌شده</p>
@@ -60,7 +60,7 @@ export default async function AnalyticsPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{accuracyPercent}%</div>
+            <div className="text-3xl font-bold tabular-nums">{accuracyPercent}%</div>
             <p className="mt-1 text-xs text-muted-foreground">میانگین دقت کلی</p>
           </CardContent>
         </Card>
@@ -73,7 +73,7 @@ export default async function AnalyticsPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">
+            <div className="text-3xl font-bold tabular-nums">
               {overview.currentStreak.toLocaleString("fa-IR")}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">روز متوالی فعال</p>
@@ -88,7 +88,7 @@ export default async function AnalyticsPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">
+            <div className="text-3xl font-bold tabular-nums">
               {overview.totalFlashcardsReviewed.toLocaleString("fa-IR")}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">کارت با حداقل یک مرور</p>
@@ -102,7 +102,7 @@ export default async function AnalyticsPage() {
             <p className="text-sm text-foreground">
               هنوز داده‌ای برای تحلیل ثبت نشده است. اولین کیس یا فلش‌کارت را شروع کنید.
             </p>
-            <Link href="/">
+            <Link href="/home">
               <Button>شروع یادگیری</Button>
             </Link>
           </CardContent>

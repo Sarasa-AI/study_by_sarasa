@@ -67,6 +67,10 @@ async function main() {
   await prisma.citation.deleteMany({});
   await prisma.clinicalDocument.deleteMany({});
   await prisma.flashcard.deleteMany({});
+  await prisma.examAnswer.deleteMany({});
+  await prisma.examSession.deleteMany({});
+  await prisma.examQuestion.deleteMany({});
+  await prisma.exam.deleteMany({});
   await prisma.questionMistake.deleteMany({});
   await prisma.quizResult.deleteMany({});
   await prisma.userProgress.deleteMany({});
@@ -598,7 +602,36 @@ async function main() {
     ],
   });
 
-  console.log("Seed completed with", casesData.length, "cases and flashcards.");
+  const seededQuestions = await prisma.question.findMany({
+    orderBy: [{ caseId: "asc" }, { orderIndex: "asc" }],
+    take: 10,
+    select: { id: true },
+  });
+
+  if (seededQuestions.length > 0) {
+    await prisma.exam.create({
+      data: {
+        title: "آزمون جامع اورژانس",
+        description:
+          "شبیه‌ساز زمان‌دار با سؤالات منتخب از کیس‌های منتشرشده. پاسخ‌ها پس از پایان آزمون قابل مرور هستند.",
+        durationMinutes: 30,
+        passingScore: 70,
+        questions: {
+          create: seededQuestions.map((q, index) => ({
+            questionId: q.id,
+            orderIndex: index,
+          })),
+        },
+      },
+    });
+  }
+
+  console.log(
+    "Seed completed with",
+    casesData.length,
+    "cases, flashcards, and",
+    seededQuestions.length > 0 ? "1 curated exam." : "no exams (no questions).",
+  );
 }
 
 main()

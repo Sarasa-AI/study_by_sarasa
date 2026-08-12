@@ -9,18 +9,13 @@ import { generateMentorReply } from "@/lib/mentor-service";
 import type { MentorChatMessage, MentorChatResult, MentorQuizContext } from "@/lib/mentor-types";
 import { prisma } from "@/lib/prisma";
 import { withServerAction } from "@/lib/server-action";
+import { serializeError } from "@/lib/serialize-error";
 
 async function resolveUserId(): Promise<string | null> {
   const user = await getSessionUser();
   return user?.id ?? null;
 }
 
-function serializeCaughtError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message, stack: error.stack };
-  }
-  return { message: "UnknownError" };
-}
 
 function handleMentorError(error: unknown): MentorChatResult {
   const aiMessage = mapAiErrorToClientMessage(error);
@@ -86,7 +81,7 @@ export async function mentorChatAction(
             event: "mentor.reply.failed",
             userId,
             caseId,
-            err: serializeCaughtError(error),
+            err: serializeError(error),
           },
           "Mentor chat failed",
         );

@@ -9,6 +9,7 @@ import {
 import { checkAndAwardAchievements, type AchievementUnlock } from "@/lib/gamification-service";
 import { getLogger } from "@/lib/logger";
 import { withServerAction } from "@/lib/server-action";
+import { serializeError } from "@/lib/serialize-error";
 
 const ratingSchema = z.enum(["again", "hard", "good", "easy"]);
 
@@ -18,12 +19,6 @@ export type FlashcardActionResult = {
   newAchievements?: AchievementUnlock[];
 };
 
-function serializeCaughtError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message, stack: error.stack };
-  }
-  return { message: "UnknownError" };
-}
 
 export async function submitFlashcardReviewAction(
   flashcardId: string,
@@ -60,7 +55,7 @@ export async function submitFlashcardReviewAction(
             event: "flashcard.review.failed",
             userId: user.id,
             flashcardId,
-            err: serializeCaughtError(error),
+            err: serializeError(error),
           },
           "Flashcard review failed",
         );

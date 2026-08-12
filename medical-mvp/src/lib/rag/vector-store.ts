@@ -1,9 +1,10 @@
 import OpenAI from "openai";
 import { Prisma } from "@prisma/client";
-import { getLogger } from "@/lib/logger";
+import { getLogger, logError } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { isTransientOpenAIError, withRetry } from "@/lib/retry";
 
-export const EMBEDDING_MODEL = "text-embedding-3-small";
+export const EMBEDDING_MODEL = "openai/text-embedding-3-small";
 export const EMBEDDING_DIMENSIONS = 1536;
 
 export type ClinicalDocumentMatch = {
@@ -17,13 +18,20 @@ export type ClinicalDocumentMatch = {
 
 let openaiClient: OpenAI | null = null;
 
-function getOpenAIClient(): OpenAI {
-  const apiKey = process.env.OPENAI_API_KEY;
+function getOpenRouterClient(): OpenAI {
+  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    throw new Error("OPENAI_API_KEY environment variable is required for embeddings");
+    throw new Error("OPENROUTER_API_KEY environment variable is required for embeddings");
   }
   if (!openaiClient) {
-    openaiClient = new OpenAI({ apiKey });
+    openaiClient = new OpenAI({
+      baseURL: "https://openrouter.ai/api/v1",
+      apiKey,
+      defaultHeaders: {
+        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+        "X-Title": "Medical MVP",
+      },
+    });
   }
   return openaiClient;
 }
@@ -53,16 +61,33 @@ export async function embedText(text: string): Promise<number[]> {
     throw new Error("Cannot embed empty text");
   }
 
-  const response = await getOpenAIClient().embeddings.create({
-    model: EMBEDDING_MODEL,
-    input,
-  });
+  try {
+    const response = await withRetry(
+      () =>
+        getOpenRouterClient().embeddings.create({
+          model: "openai/text-embedding-3-small",
+          input,
+        }),
+      {
+        operation: "embedding.create",
+        isRetryable: isTransientOpenAIError,
+      },
+    );
 
-  const embedding = response.data[0]?.embedding;
-  if (!embedding || embedding.length !== EMBEDDING_DIMENSIONS) {
-    throw new Error("OpenAI returned an invalid embedding");
+    const embedding = response.data[0]?.embedding;
+    if (!embedding || embedding.length !== EMBEDDING_DIMENSIONS) {
+      throw new Error("Embedding provider returned an invalid embedding");
+    }
+    return embedding;
+  } catch (error) {
+    logError(getLogger(), {
+      event: "embedding.failure",
+      operation: "embedding.create",
+      error,
+      msg: "Embedding request failed",
+    });
+    throw error;
   }
-  return embedding;
 }
 
 export async function similaritySearch(

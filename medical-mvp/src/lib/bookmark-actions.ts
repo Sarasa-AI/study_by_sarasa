@@ -8,6 +8,7 @@ import {
 } from "@/lib/bookmark-service";
 import { getLogger } from "@/lib/logger";
 import { withServerAction } from "@/lib/server-action";
+import { serializeError } from "@/lib/serialize-error";
 
 const caseIdSchema = z.string().min(1);
 const noteContentSchema = z.string();
@@ -18,12 +19,6 @@ export type BookmarkActionResult = {
   bookmarked?: boolean;
 };
 
-function serializeCaughtError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message, stack: error.stack };
-  }
-  return { message: "UnknownError" };
-}
 
 export async function toggleBookmarkAction(
   caseId: string,
@@ -58,7 +53,7 @@ export async function toggleBookmarkAction(
             event: "bookmark.toggle.failed",
             userId: user.id,
             caseId,
-            err: serializeCaughtError(error),
+            err: serializeError(error),
           },
           "Bookmark toggle failed",
         );
@@ -106,7 +101,7 @@ export async function saveUserNoteAction(
             event: "note.save.failed",
             userId: user.id,
             caseId,
-            err: serializeCaughtError(error),
+            err: serializeError(error),
           },
           "Note save failed",
         );

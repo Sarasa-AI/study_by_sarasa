@@ -54,6 +54,12 @@ enum FeedbackStatus {
   DISMISSED
 }
 
+enum ExamSessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
 // Models
 model User {
   id                  String                  @id @default(cuid())
@@ -74,9 +80,12 @@ model User {
   bookmarks           UserBookmark[]
   notes               UserNote[]
   feedbacks           QuestionFeedback[]
+  examSessions        ExamSession[]
   instructedCases     Case[]                  @relation("InstructorCases")
   reviewedCases       Case[]                  @relation("CaseReviewer")
   reviewedFlashcards  Flashcard[]             @relation("FlashcardReviewer")
+  gamification        UserGamification?
+  leagueMemberships   LeagueMembership[]
 }
 
 model Category {
@@ -106,6 +115,8 @@ model Case {
   reviewNotes           String?
   mediaUrl              String?
   mediaType             MediaType?
+  references            String?
+  embedding             Unsupported("vector(1536)")?
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
   category              Category       @relation(fields: [categoryId], references: [id])
@@ -137,6 +148,8 @@ model Question {
   case                 Case               @relation(fields: [caseId], references: [id], onDelete: Cascade)
   mistakes             QuestionMistake[]
   feedbacks            QuestionFeedback[]
+  examQuestions        ExamQuestion[]
+  examAnswers          ExamAnswer[]
 }
 
 model QuestionFeedback {
@@ -316,4 +329,102 @@ model ClinicalDocument {
   embedding Unsupported("vector(1536)")?
   createdAt DateTime                     @default(now())
   updatedAt DateTime                     @updatedAt
+}
+
+model Exam {
+  id              String         @id @default(cuid())
+  title           String
+  description     String?
+  durationMinutes Int
+  passingScore    Int
+  createdAt       DateTime       @default(now())
+  questions       ExamQuestion[]
+  sessions        ExamSession[]
+}
+
+model ExamQuestion {
+  id         String @id @default(cuid())
+  examId     String
+  questionId String
+  orderIndex Int    @default(0)
+
+  exam     Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([examId, questionId])
+  @@index([examId, orderIndex])
+}
+
+model ExamSession {
+  id          String            @id @default(cuid())
+  userId      String
+  examId      String
+  status      ExamSessionStatus @default(IN_PROGRESS)
+  startedAt   DateTime          @default(now())
+  completedAt DateTime?
+  score       Float?
+
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exam    Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
+  answers ExamAnswer[]
+
+  @@index([userId, status])
+  @@index([examId])
+}
+
+model ExamAnswer {
+  id             String  @id @default(cuid())
+  sessionId      String
+  questionId     String
+  selectedOption String
+  isCorrect      Boolean
+  xpAwarded      Boolean @default(false)
+
+  session  ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, questionId])
+  @@index([sessionId])
+}
+
+model UserGamification {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  totalXP        Int       @default(0)
+  currentStreak  Int       @default(0)
+  longestStreak  Int       @default(0)
+  lastActiveDate DateTime?
+  freezeTokens   Int       @default(2)
+  leagueId       String?
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  league League? @relation(fields: [leagueId], references: [id], onDelete: SetNull)
+
+  @@index([leagueId])
+}
+
+model League {
+  id            String   @id @default(cuid())
+  weekStartDate DateTime
+  tier          Int
+
+  memberships    LeagueMembership[]
+  gamification   UserGamification[]
+
+  @@unique([weekStartDate, tier])
+  @@index([weekStartDate])
+}
+
+model LeagueMembership {
+  id        String @id @default(cuid())
+  userId    String
+  leagueId  String
+  weeklyXP  Int    @default(0)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, leagueId])
+  @@index([leagueId, weeklyXP])
+  @@index([userId])
 }

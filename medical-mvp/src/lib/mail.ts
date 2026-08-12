@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { Resend } from "resend";
 import { getLogger } from "@/lib/logger";
+import { isTransientGenericError, withRetry } from "@/lib/retry";
+import { serializeError } from "@/lib/serialize-error";
 
 const DEFAULT_SEND_EMAIL_TIMEOUT_MS = 10_000;
 
@@ -85,15 +87,22 @@ export async function sendEmail(
   const timeoutMs = getSendEmailTimeoutMs();
 
   try {
-    const result = await withTimeout(
-      resend.emails.send({
-        from,
-        to,
-        subject,
-        html: htmlBody,
-      }),
-      timeoutMs,
-      "Resend email send",
+    const result = await withRetry(
+      () =>
+        withTimeout(
+          resend.emails.send({
+            from,
+            to,
+            subject,
+            html: htmlBody,
+          }),
+          timeoutMs,
+          "Resend email send",
+        ),
+      {
+        operation: "mail.send",
+        isRetryable: isTransientGenericError,
+      },
     );
 
     if (result.error) {
@@ -121,8 +130,7 @@ export async function sendEmail(
         event: "mail.send.failed",
         recipientHash,
         latencyMs: Date.now() - startedAt,
-        errorType: error instanceof Error ? error.name : "UnknownError",
-        errorMessage: error instanceof Error ? error.message : "Unknown error",
+        err: serializeError(error),
       },
       "Email send failed",
     );

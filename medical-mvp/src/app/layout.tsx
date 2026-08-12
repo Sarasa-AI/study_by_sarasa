@@ -19,8 +19,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "MVP آموزش بالینی",
-  description: "پلتفرم وب‌محور آموزش تشخیص و مدیریت بیماری‌های اورژانسی",
+  title: "مدیکال MVP | شبیه‌ساز هوشمند آزمون پزشکی",
+  description:
+    "پلتفرم آمادگی آزمون‌های پزشکی با هوش مصنوعی مبتنی بر گایدلاین، شبیه‌ساز زمان‌دار، جستجوی مفهومی و داشبورد تحلیلی",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:strict": "next build",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
@@ -13,14 +14,18 @@
     "prisma:push": "prisma db push",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
-    "qr:generate": "tsx scripts/generate-qr.ts"
+    "prisma:seed:rag": "tsx --env-file=.env prisma/seed-rag.ts",
+    "cases:embed": "tsx --env-file=.env scripts/embed-cases.ts",
+    "qr:generate": "tsx scripts/generate-qr.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
-    "@playwright/test": "^1.59.1",
     "@prisma/client": "^5.18.0",
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.0.10",
@@ -32,6 +37,7 @@
     "next": "^14.2.35",
     "next-auth": "^4.24.7",
     "openai": "^6.46.0",
+    "pdf-parse": "^1.1.1",
     "pino": "^10.3.1",
     "playwright": "^1.59.1",
     "qrcode": "^1.5.4",
@@ -41,16 +47,20 @@
     "react-hook-form": "^7.74.0",
     "recharts": "^3.9.1",
     "resend": "^6.17.2",
+    "sharp": "^0.35.3",
     "supertest": "^7.2.2",
     "tailwind-merge": "^2.5.2",
     "ts-jest": "^29.4.9",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/node": "^22.7.4",
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^22.20.1",
+    "@types/pdf-parse": "^1.1.5",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@types/sharp": "^0.31.1",
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
     "eslint-config-next": "^14.2.35",

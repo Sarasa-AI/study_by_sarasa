@@ -67,5 +67,6 @@ describe("aiCaseGenerationSchema", () => {
     expect(formValues.questions).toHaveLength(1);
     expect(formValues.questions[0]?.correctAnswer).toBe("C");
     expect(formValues.patientInfo).toContain("تندرنس RLQ");
+    expect(formValues.referencesText).toBe("");
   });
 });

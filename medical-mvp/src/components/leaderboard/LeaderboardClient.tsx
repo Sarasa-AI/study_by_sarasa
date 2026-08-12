@@ -1,19 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Snowflake, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
-import type {
-  LeaderboardData,
-  LeaderboardEntry,
-  UserAchievementView,
-} from "@/lib/gamification-service";
+import type { WeeklyLeagueResult } from "@/lib/gamification-actions";
+import type { UserAchievementView } from "@/lib/gamification-service";
 
-type MainTab = "leaderboard" | "achievements";
-type BoardMode = "overall" | "weekly";
+type MainTab = "league" | "achievements";
 
 type LeaderboardClientProps = {
-  leaderboard: LeaderboardData;
+  league: WeeklyLeagueResult;
   achievements: UserAchievementView[];
 };
 
@@ -28,27 +25,39 @@ function rankAccentClass(rank: number): string {
   if (rank === 1) return "border-amber-300 bg-amber-50";
   if (rank === 2) return "border-slate-300 bg-slate-50";
   if (rank === 3) return "border-orange-300 bg-orange-50";
-  return "border-border bg-white";
+  return "border-slate-200 bg-white";
 }
 
 function rankBadgeClass(rank: number): string {
   if (rank === 1) return "bg-amber-400 text-amber-950";
   if (rank === 2) return "bg-slate-400 text-white";
   if (rank === 3) return "bg-orange-400 text-orange-950";
-  return "bg-muted text-foreground";
+  return "bg-slate-100 text-slate-700";
 }
 
-function LeaderboardRow({
+function formatCountdown(msRemaining: number): string {
+  if (msRemaining <= 0) return "۰۰:۰۰:۰۰";
+  const totalSeconds = Math.floor(msRemaining / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const pad = (n: number) => n.toLocaleString("fa-IR", { minimumIntegerDigits: 2 });
+
+  if (days > 0) {
+    return `${days.toLocaleString("fa-IR")} روز و ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  }
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+}
+
+function LeagueRow({
   entry,
-  mode,
   sticky,
 }: {
-  entry: LeaderboardEntry;
-  mode: BoardMode;
+  entry: WeeklyLeagueResult["members"][number];
   sticky?: boolean;
 }) {
-  const xp = mode === "overall" ? entry.totalXp : entry.weeklyXp;
-
   return (
     <div
       className={`flex items-center gap-3 rounded-xl border px-3 py-3 ${rankAccentClass(entry.rank)} ${
@@ -64,19 +73,21 @@ function LeaderboardRow({
         {getInitials(entry.name)}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate font-medium">
+        <div className="truncate font-medium text-slate-900">
           {entry.name}
           {entry.isCurrentUser ? (
             <span className="mr-2 text-xs text-teal-700">(شما)</span>
           ) : null}
         </div>
-        <div className="mt-0.5 text-xs text-muted-foreground">
-          🔥 استریک {entry.currentStreak.toLocaleString("fa-IR")} روز
+        <div className="mt-0.5 text-xs text-slate-500">
+          دقت پاسخ‌ها: {entry.accuracyPercent.toLocaleString("fa-IR")}٪
         </div>
       </div>
       <div className="shrink-0 text-left">
-        <div className="text-base font-bold tabular-nums">{xp.toLocaleString("fa-IR")}</div>
-        <div className="text-[11px] text-muted-foreground">XP</div>
+        <div className="text-base font-bold tabular-nums text-slate-900">
+          {entry.weeklyXP.toLocaleString("fa-IR")}
+        </div>
+        <div className="text-[11px] text-slate-500">امتیاز این هفته</div>
       </div>
     </div>
   );
@@ -90,7 +101,7 @@ function AchievementCard({ achievement }: { achievement: UserAchievementView }) 
 
   if (achievement.isUnlocked) {
     return (
-      <Card className="border-teal-200 bg-gradient-to-br from-teal-50 to-amber-50">
+      <Card className="border-teal-200 bg-gradient-to-br from-teal-50 to-amber-50 transition-shadow hover:shadow-soft-lg">
         <CardContent className="space-y-2 pt-4">
           <div className="text-3xl">{achievement.icon}</div>
           <div className="font-bold text-teal-900">{achievement.title}</div>
@@ -110,7 +121,7 @@ function AchievementCard({ achievement }: { achievement: UserAchievementView }) 
         <div className="font-bold text-slate-600">{achievement.title}</div>
         <p className="text-sm text-slate-500">{achievement.description}</p>
         <div className="space-y-1">
-          <div className="flex justify-between text-xs text-muted-foreground">
+          <div className="flex justify-between text-xs text-slate-500">
             <span>
               {achievement.currentValue.toLocaleString("fa-IR")} /{" "}
               {achievement.threshold.toLocaleString("fa-IR")}
@@ -129,30 +140,41 @@ function AchievementCard({ achievement }: { achievement: UserAchievementView }) 
   );
 }
 
-export function LeaderboardClient({ leaderboard, achievements }: LeaderboardClientProps) {
-  const [mainTab, setMainTab] = useState<MainTab>("leaderboard");
-  const [boardMode, setBoardMode] = useState<BoardMode>("overall");
+export function LeaderboardClient({ league, achievements }: LeaderboardClientProps) {
+  const [mainTab, setMainTab] = useState<MainTab>("league");
+  const [msRemaining, setMsRemaining] = useState(() => {
+    const endsAt = new Date(league.weekEndsAt).getTime();
+    return Math.max(0, endsAt - Date.now());
+  });
 
-  const board = boardMode === "overall" ? leaderboard.overall : leaderboard.weekly;
-  const currentInTop = board.entries.some((entry) => entry.isCurrentUser);
+  useEffect(() => {
+    const endsAt = new Date(league.weekEndsAt).getTime();
+    const tick = () => setMsRemaining(Math.max(0, endsAt - Date.now()));
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [league.weekEndsAt]);
+
+  const currentInTop = league.members.some((entry) => entry.isCurrentUser);
+  const currentEntry = league.members.find((entry) => entry.isCurrentUser);
   const showStickyCurrent =
-    board.currentUser !== null && (!currentInTop || board.currentUser.rank > 3);
+    currentEntry != null && (!currentInTop || currentEntry.rank > 3);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">جدول رقابتی و دستاوردها</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          رتبه خود را ببینید و مدال‌های مطالعه را جمع کنید
+        <h1 className="text-2xl font-bold text-slate-900">لیگ هفتگی</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          با پاسخ‌های درست در آزمون‌ها امتیاز بگیرید و در لیگ خود رقابت کنید
         </p>
       </div>
 
       <div className="flex flex-wrap gap-2">
         <Button
-          variant={mainTab === "leaderboard" ? "secondary" : "ghost"}
-          onClick={() => setMainTab("leaderboard")}
+          variant={mainTab === "league" ? "secondary" : "ghost"}
+          onClick={() => setMainTab("league")}
         >
-          جدول برترین‌ها
+          لیگ هفتگی
         </Button>
         <Button
           variant={mainTab === "achievements" ? "secondary" : "ghost"}
@@ -162,50 +184,94 @@ export function LeaderboardClient({ leaderboard, achievements }: LeaderboardClie
         </Button>
       </div>
 
-      {mainTab === "leaderboard" ? (
-        <Card>
-          <CardHeader className="space-y-3">
-            <div className="font-semibold">رتبه‌بندی دانشجویان</div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                className="px-3 py-1.5 text-xs"
-                variant={boardMode === "overall" ? "secondary" : "ghost"}
-                onClick={() => setBoardMode("overall")}
-              >
-                کلی
-              </Button>
-              <Button
-                className="px-3 py-1.5 text-xs"
-                variant={boardMode === "weekly" ? "secondary" : "ghost"}
-                onClick={() => setBoardMode("weekly")}
-              >
-                هفتگی
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {board.currentUser && !currentInTop ? (
-              <div className="mb-3">
-                <div className="mb-1 text-xs text-muted-foreground">رتبه شما</div>
-                <LeaderboardRow entry={board.currentUser} mode={boardMode} />
+      {mainTab === "league" ? (
+        <div className="space-y-4">
+          <Card className="border-teal-200 bg-gradient-to-bl from-teal-50/80 to-white">
+            <CardContent className="space-y-4 pt-5">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-600 text-white shadow-soft">
+                    <Trophy className="h-6 w-6" strokeWidth={2} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-teal-700">لیگ فعلی شما</p>
+                    <h2 className="text-xl font-bold text-slate-900">{league.tierName}</h2>
+                  </div>
+                </div>
+                <div className="rounded-xl bg-white/80 px-4 py-2 text-left ring-1 ring-teal-100">
+                  <p className="text-[11px] text-slate-500">زمان تا ریست هفتگی</p>
+                  <p className="font-mono text-lg font-bold tabular-nums text-teal-800">
+                    {formatCountdown(msRemaining)}
+                  </p>
+                </div>
               </div>
-            ) : null}
 
-            {board.entries.length === 0 ? (
-              <p className="text-sm text-muted-foreground">هنوز رتبه‌ای ثبت نشده است.</p>
-            ) : (
-              board.entries.map((entry) => (
-                <LeaderboardRow key={entry.userId} entry={entry} mode={boardMode} />
-              ))
-            )}
-
-            {showStickyCurrent && board.currentUser && currentInTop ? (
-              <div className="pt-2">
-                <LeaderboardRow entry={board.currentUser} mode={boardMode} sticky />
+              <div className="flex flex-wrap gap-3 text-sm">
+                <div className="rounded-lg bg-white px-3 py-2 ring-1 ring-slate-200">
+                  <span className="text-slate-500">امتیاز این هفته: </span>
+                  <span className="font-bold tabular-nums text-slate-900">
+                    {league.weeklyXP.toLocaleString("fa-IR")}
+                  </span>
+                </div>
+                {league.currentUserRank != null ? (
+                  <div className="rounded-lg bg-white px-3 py-2 ring-1 ring-slate-200">
+                    <span className="text-slate-500">رتبه شما: </span>
+                    <span className="font-bold tabular-nums text-slate-900">
+                      {league.currentUserRank.toLocaleString("fa-IR")}
+                    </span>
+                  </div>
+                ) : null}
+                <div className="inline-flex items-center gap-1.5 rounded-lg bg-sky-50 px-3 py-2 text-sky-800 ring-1 ring-sky-200">
+                  <Snowflake className="h-3.5 w-3.5" strokeWidth={2.25} />
+                  <span>
+                    توکن یخ‌زدگی باقی‌مانده:{" "}
+                    <span className="font-bold tabular-nums">
+                      {league.freezeTokens.toLocaleString("fa-IR")}
+                    </span>
+                  </span>
+                </div>
               </div>
-            ) : null}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="font-semibold text-slate-900">رتبه‌بندی لیگ</div>
+              <p className="text-xs text-slate-500">۲۵ نفر برتر بر اساس امتیاز این هفته</p>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {currentEntry == null && league.currentUserRank != null ? (
+                <div className="mb-3 rounded-xl border border-teal-200 bg-teal-50/50 px-3 py-3">
+                  <div className="mb-1 text-xs text-teal-700">رتبه شما خارج از ۲۵ نفر برتر</div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-medium text-slate-800">
+                      رتبه {league.currentUserRank.toLocaleString("fa-IR")}
+                    </span>
+                    <span className="font-bold tabular-nums text-slate-900">
+                      {league.weeklyXP.toLocaleString("fa-IR")} امتیاز
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+
+              {league.members.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  هنوز کسی در این لیگ امتیاز نگرفته است. با شرکت در آزمون شروع کنید.
+                </p>
+              ) : (
+                league.members.map((entry) => (
+                  <LeagueRow key={entry.userId} entry={entry} />
+                ))
+              )}
+
+              {showStickyCurrent && currentEntry ? (
+                <div className="pt-2">
+                  <LeagueRow entry={currentEntry} sticky />
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {achievements.map((achievement) => (

@@ -1,6 +1,7 @@
 "use server";
 
 import { Prisma } from "@prisma/client";
+import { revalidateTag } from "next/cache";
 import { z, type ZodError } from "zod";
 import { isCategoryWeakForUser } from "@/lib/analytics-service";
 import { getSessionUser } from "@/lib/auth";
@@ -243,6 +244,8 @@ export async function submitQuizAction(
           timeout: 15000,
         },
       );
+
+      revalidateTag("cohort-analytics");
 
       const newAchievements = await checkAndAwardAchievements(userId);
 

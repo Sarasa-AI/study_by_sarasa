@@ -38,7 +38,7 @@ export default function LoginPage() {
     if (res?.ok) {
       const session = await getSession();
       const role = session?.user?.role;
-      router.push(role === "INSTRUCTOR" ? "/instructor" : "/");
+      router.push(role === "INSTRUCTOR" ? "/instructor" : "/home");
     } else {
       setLoading(false);
       setHasError(true);

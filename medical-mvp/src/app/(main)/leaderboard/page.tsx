@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 import { LeaderboardClient } from "@/components/leaderboard/LeaderboardClient";
 import { getSessionUser } from "@/lib/auth";
+import { getWeeklyLeague } from "@/lib/gamification-actions";
 import {
   checkAndAwardAchievements,
-  getLeaderboardData,
   getUserAchievements,
 } from "@/lib/gamification-service";
 
@@ -15,13 +15,18 @@ export default async function LeaderboardPage() {
 
   const userId = sessionUser.id;
 
-  // Award any newly earned badges before loading gallery data
   await checkAndAwardAchievements(userId);
 
-  const [leaderboard, achievements] = await Promise.all([
-    getLeaderboardData(userId),
+  const [leagueResult, achievements] = await Promise.all([
+    getWeeklyLeague(),
     getUserAchievements(userId),
   ]);
 
-  return <LeaderboardClient leaderboard={leaderboard} achievements={achievements} />;
+  if (!leagueResult.success) {
+    redirect("/login");
+  }
+
+  return (
+    <LeaderboardClient league={leagueResult.data} achievements={achievements} />
+  );
 }

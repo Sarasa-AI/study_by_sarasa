@@ -1,9 +1,9 @@
-import Image from "next/image";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import Link from "next/link";
 import { CaseBookmarkButton } from "@/components/case/CaseBookmarkButton";
+import { ClinicalImageViewer } from "@/components/case/ClinicalImageViewer";
 import { PersonalNoteEditor } from "@/components/case/PersonalNoteEditor";
 import { getSessionUser } from "@/lib/auth";
 import { getCaseBookmarkAndNote } from "@/lib/bookmark-service";
@@ -48,10 +48,8 @@ export default async function CasePage({ params }: { params: { id: string } }) {
                 سن: {patient.age} | جنس: {patient.gender} | CC: {kase.chiefComplaint}
               </div>
             </div>
-            {kase.mediaUrl ? (
-              <div className="relative h-64 w-full overflow-hidden rounded-xl border">
-                <Image src={kase.mediaUrl} alt="media" fill className="object-cover" />
-              </div>
+            {kase.mediaUrl && (kase.mediaType === "IMAGE" || !kase.mediaType) ? (
+              <ClinicalImageViewer src={kase.mediaUrl} previewClassName="h-64" />
             ) : null}
           </div>
           <div>

@@ -10,11 +10,13 @@ vi.mock("openai", () => {
 
   class APIError extends Error {
     status: number;
+    headers?: Record<string, string>;
 
-    constructor(message: string, status: number) {
+    constructor(message: string, status: number, headers?: Record<string, string>) {
       super(message);
       this.status = status;
       this.name = "APIError";
+      this.headers = headers;
     }
   }
 
@@ -28,6 +30,22 @@ vi.mock("openai", () => {
     })),
     APIConnectionError,
     APIError,
+  };
+});
+
+vi.mock("@/lib/retry", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/retry")>("@/lib/retry");
+  return {
+    ...actual,
+    withRetry: async <T>(
+      fn: () => Promise<T>,
+      options: Parameters<typeof actual.withRetry>[1],
+    ) =>
+      actual.withRetry(fn, {
+        ...options,
+        sleep: async () => undefined,
+        random: () => 0,
+      }),
   };
 });
 
@@ -91,5 +109,114 @@ describe("generateStructuredData", () => {
         schema,
       }),
     ).resolves.toEqual({ title: "Case A" });
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "test/model" }),
+    );
+  });
+
+  it("falls back to openai/gpt-4o-mini when no model env vars are set", async () => {
+    delete process.env.OPENROUTER_DEFAULT_MODEL;
+    delete process.env.OPENROUTER_MODEL;
+
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ title: "Case B" }) } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    });
+
+    const { generateStructuredData } = await import("@/lib/ai");
+    const schema = z.object({ title: z.string() });
+
+    await expect(
+      generateStructuredData({
+        operation: "case-generation",
+        prompt: "test prompt",
+        schema,
+      }),
+    ).resolves.toEqual({ title: "Case B" });
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "openai/gpt-4o-mini" }),
+    );
+  });
+
+  it("maps maxTokens to OpenRouter max_tokens", async () => {
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ title: "Case C" }) } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    });
+
+    const { generateStructuredData } = await import("@/lib/ai");
+    const schema = z.object({ title: z.string() });
+
+    await expect(
+      generateStructuredData({
+        operation: "case-generation",
+        prompt: "test prompt",
+        schema,
+        maxTokens: 4000,
+      }),
+    ).resolves.toEqual({ title: "Case C" });
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "test/model", max_tokens: 4000 }),
+    );
+  });
+
+  it("retries transient 429 errors then returns parsed data", async () => {
+    const { APIError } = await import("openai");
+    const RateLimitError = APIError as unknown as new (
+      message: string,
+      status: number,
+    ) => InstanceType<typeof APIError>;
+
+    mockCreate
+      .mockRejectedValueOnce(new RateLimitError("rate limited", 429))
+      .mockRejectedValueOnce(new RateLimitError("rate limited", 429))
+      .mockResolvedValueOnce({
+        choices: [{ message: { content: JSON.stringify({ title: "After Retry" }) } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+
+    const { generateStructuredData } = await import("@/lib/ai");
+    const schema = z.object({ title: z.string() });
+
+    await expect(
+      generateStructuredData({
+        operation: "case-generation",
+        prompt: "test prompt",
+        schema,
+      }),
+    ).resolves.toEqual({ title: "After Retry" });
+
+    expect(mockCreate).toHaveBeenCalledTimes(3);
+  });
+
+  it("maps exhausted rate-limit retries to RATE_LIMIT", async () => {
+    const { APIError } = await import("openai");
+    const RateLimitError = APIError as unknown as new (
+      message: string,
+      status: number,
+    ) => InstanceType<typeof APIError>;
+
+    mockCreate.mockRejectedValue(new RateLimitError("rate limited", 429));
+
+    const { generateStructuredData, AIGatewayError } = await import("@/lib/ai");
+    const schema = z.object({ title: z.string() });
+
+    try {
+      await generateStructuredData({
+        operation: "case-generation",
+        prompt: "test prompt",
+        schema,
+      });
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AIGatewayError);
+      expect((error as InstanceType<typeof AIGatewayError>).code).toBe("RATE_LIMIT");
+    }
+
+    // initial + 3 retries
+    expect(mockCreate).toHaveBeenCalledTimes(4);
   });
 });

@@ -3,6 +3,7 @@
 import React from "react";
 import { SessionProvider } from "next-auth/react";
 import { LocaleProvider } from "@/components/i18n/LocaleProvider";
+import { ClientErrorReporter } from "@/components/providers/ClientErrorReporter";
 import type { Locale } from "@/locales";
 
 type ProvidersProps = {
@@ -13,6 +14,7 @@ type ProvidersProps = {
 export function Providers({ children, locale }: ProvidersProps) {
   return (
     <SessionProvider>
+      <ClientErrorReporter />
       <LocaleProvider initialLocale={locale}>{children}</LocaleProvider>
     </SessionProvider>
   );

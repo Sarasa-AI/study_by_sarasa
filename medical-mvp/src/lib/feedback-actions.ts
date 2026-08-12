@@ -9,6 +9,7 @@ import {
 } from "@/lib/feedback-service";
 import { getLogger } from "@/lib/logger";
 import { withServerAction } from "@/lib/server-action";
+import { serializeError } from "@/lib/serialize-error";
 
 const reasonSchema = z.nativeEnum(FeedbackReason);
 const reviewStatusSchema = z.enum([
@@ -32,12 +33,6 @@ export type FeedbackActionResult = {
   message: string;
 };
 
-function serializeCaughtError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message, stack: error.stack };
-  }
-  return { message: "UnknownError" };
-}
 
 export async function submitQuestionFeedbackAction(input: {
   questionId: string;
@@ -77,7 +72,7 @@ export async function submitQuestionFeedbackAction(input: {
           {
             event: "feedback.submit.failed",
             userId: user.id,
-            err: serializeCaughtError(error),
+            err: serializeError(error),
           },
           "Feedback submit failed",
         );
@@ -128,7 +123,7 @@ export async function updateFeedbackStatusAction(input: {
           {
             event: "feedback.update_status.failed",
             userId: user.id,
-            err: serializeCaughtError(error),
+            err: serializeError(error),
           },
           "Feedback status update failed",
         );

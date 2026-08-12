@@ -51,6 +51,9 @@ export default async function QuizPage({ params }: { params: { id: string } }) {
         caseTitle={kase.title}
         caseContext={caseContext}
         questions={questions}
+        mediaUrl={
+          kase.mediaUrl && (kase.mediaType === "IMAGE" || !kase.mediaType) ? kase.mediaUrl : null
+        }
       />
     </div>
   );

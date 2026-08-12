@@ -44,7 +44,7 @@ export const authOptions: NextAuthOptions = {
         const user = await prisma.user
           .upsert({
             where: studentCode ? { studentCode } : { id: "no-id" },
-            update: { name, role },
+            update: { name },
             create: {
               name,
               role,
@@ -59,7 +59,7 @@ export const authOptions: NextAuthOptions = {
             if (existing) {
               return prisma.user.update({
                 where: { id: existing.id },
-                data: { name, role },
+                data: { name },
               });
             }
             return prisma.user.create({

@@ -1,6 +1,7 @@
 "use server";
 
 import { Prisma, Role } from "@prisma/client";
+import { revalidateTag } from "next/cache";
 import { ZodError } from "zod";
 import {
   type CaseActionResult,
@@ -14,6 +15,7 @@ import { getSessionUser } from "@/lib/auth";
 import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { withServerAction } from "@/lib/server-action";
+import { serializeError } from "@/lib/serialize-error";
 
 async function resolveInstructorId(): Promise<{ id: string } | { error: string }> {
   const user = await getSessionUser();
@@ -26,12 +28,6 @@ async function resolveInstructorId(): Promise<{ id: string } | { error: string }
   return { id: user.id };
 }
 
-function serializeCaughtError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message, stack: error.stack };
-  }
-  return { message: "UnknownError" };
-}
 
 function handleActionError(error: unknown): CaseActionResult {
   if (error instanceof ZodError) {
@@ -71,6 +67,7 @@ export async function createCaseAction(values: CaseFormValues, status: CaseStatu
       try {
         const payload = toCasePayload(values, resolved.id, status);
         const created = await prisma.$transaction((tx) => createCase(tx, payload));
+        revalidateTag("cohort-analytics");
         return {
           success: true,
           message: status === "PUBLISHED" ? "کیس با موفقیت منتشر شد" : "پیش‌نویس ذخیره شد",
@@ -81,9 +78,60 @@ export async function createCaseAction(values: CaseFormValues, status: CaseStatu
           {
             event: "case.create.failed",
             userId: resolved.id,
-            err: serializeCaughtError(error),
+            err: serializeError(error),
           },
           "Case create failed",
+        );
+        return handleActionError(error);
+      }
+    },
+  );
+}
+
+export async function deleteCaseAction(id: string): Promise<CaseActionResult> {
+  const resolved = await resolveInstructorId();
+  if ("error" in resolved) {
+    return { success: false, message: authErrorMessage(resolved.error, "update") };
+  }
+
+  return withServerAction(
+    {
+      operation: "case-delete",
+      userId: resolved.id,
+      input: { caseId: id },
+    },
+    async () => {
+      try {
+        const existing = await getCaseById(prisma, id);
+        if (!existing) {
+          return { success: false, message: "کیس یافت نشد" };
+        }
+        if (existing.instructorId !== resolved.id) {
+          return { success: false, message: "شما اجازه حذف این کیس را ندارید" };
+        }
+
+        await prisma.$transaction(async (tx) => {
+          // UserProgress and QuizResult reference Case without onDelete: Cascade,
+          // so they must be removed first to avoid a FK constraint violation.
+          await tx.userProgress.deleteMany({ where: { caseId: id } });
+          await tx.quizResult.deleteMany({ where: { caseId: id } });
+          // All remaining relations (Question→Cascade, UserBookmark→Cascade,
+          // UserNote→Cascade, Citation→Cascade, Flashcard→SetNull) are handled
+          // by the database; deleting the Case here is safe.
+          await tx.case.delete({ where: { id } });
+        });
+
+        revalidateTag("cohort-analytics");
+        return { success: true, message: "کیس با موفقیت حذف شد" };
+      } catch (error) {
+        getLogger().error(
+          {
+            event: "case.delete.failed",
+            userId: resolved.id,
+            caseId: id,
+            err: serializeError(error),
+          },
+          "Case delete failed",
         );
         return handleActionError(error);
       }
@@ -119,6 +167,7 @@ export async function updateCaseAction(
 
         const payload = toCasePayload(values, resolved.id, status);
         const updated = await prisma.$transaction((tx) => updateCase(tx, id, payload));
+        revalidateTag("cohort-analytics");
         return {
           success: true,
           message: status === "PUBLISHED" ? "کیس با موفقیت به‌روزرسانی شد" : "پیش‌نویس به‌روزرسانی شد",
@@ -130,7 +179,7 @@ export async function updateCaseAction(
             event: "case.update.failed",
             userId: resolved.id,
             caseId: id,
-            err: serializeCaughtError(error),
+            err: serializeError(error),
           },
           "Case update failed",
         );

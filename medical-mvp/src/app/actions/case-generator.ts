@@ -5,6 +5,7 @@ import { z, type ZodError } from "zod";
 import { generateCaseWithAI, generateCaseWithRAG } from "@/lib/ai-case-generator";
 import {
   buildPatientInfoFromAi,
+  FALLBACK_REFERENCE_NOTE,
   mapAiCaseToFormValues,
   type AiCaseGeneration,
 } from "@/lib/ai-schemas";
@@ -22,6 +23,7 @@ import { getSessionUser } from "@/lib/auth";
 import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { withServerAction } from "@/lib/server-action";
+import { serializeError } from "@/lib/serialize-error";
 
 function urlOrDoiFromMetadata(metadata: Prisma.JsonValue): string | null {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
@@ -37,6 +39,7 @@ export type CaseGenerationResult = CaseActionResult & {
     formValues?: CaseFormValues;
     case?: unknown;
     caseId?: string;
+    isFallback?: boolean;
   };
 };
 
@@ -49,12 +52,6 @@ async function resolveSystemInstructorId(): Promise<string | null> {
   return instructor?.id ?? null;
 }
 
-function serializeCaughtError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message, stack: error.stack };
-  }
-  return { message: "UnknownError" };
-}
 
 function handleGenerationError(error: unknown): CaseGenerationResult {
   if (error instanceof z.ZodError) {
@@ -84,6 +81,7 @@ function toCasePayload(
   categoryId: string,
   instructorId: string,
   status: CaseStatusValue,
+  references?: string | null,
 ) {
   return casePayloadSchema.parse({
     title: data.title,
@@ -93,6 +91,7 @@ function toCasePayload(
     patientInfo: buildPatientInfoFromAi(data),
     mediaUrl: null,
     mediaType: null,
+    references: references?.trim() || null,
     symptoms: data.symptoms,
     diagnosis: data.diagnosis,
     differentialDiagnosis: data.differentialDiagnosis,
@@ -173,14 +172,72 @@ export async function generateClinicalCaseAction(
           }
         }
 
-        const aiData = await generateCaseWithAI({
-          topic: topic?.trim() ?? "",
-          categoryName: category.name,
-          questionCount: 1,
-          isRemedial,
-        });
+        let formValues: CaseFormValues;
+        let references: string | null = null;
+        let aiDataForPersist: AiCaseGeneration | null = null;
 
-        const formValues = mapAiCaseToFormValues(aiData, category.id);
+        if (isRemedial) {
+          const aiData = await generateCaseWithAI({
+            topic: topic?.trim() ?? "",
+            categoryName: category.name,
+            questionCount: 1,
+            isRemedial: true,
+          });
+          aiDataForPersist = aiData;
+          formValues = mapAiCaseToFormValues(aiData, category.id);
+        } else {
+          const trimmedTopic = topic?.trim() ?? "";
+          if (!trimmedTopic) {
+            return { success: false, message: "موضوع یا سناریوی بالینی الزامی است" };
+          }
+
+          const ragResult = await generateCaseWithRAG({
+            topic: trimmedTopic,
+            categoryName: category.name,
+            questionCount: 1,
+          });
+          references = ragResult.isFallback
+            ? FALLBACK_REFERENCE_NOTE
+            : ragResult.citationSources.join("\n") || null;
+          aiDataForPersist = ragResult.case;
+          formValues = {
+            ...mapAiCaseToFormValues(ragResult.case, category.id),
+            referencesText: references ?? "",
+          };
+
+          if (!shouldPersist) {
+            return {
+              success: true,
+              message: ragResult.isFallback
+                ? "کیس تولید شد، اما بر پایه دانش عمومی مدل و بدون رفرنس اختصاصی است"
+                : "کیس با موفقیت تولید شد؛ پیش از ذخیره بررسی کنید",
+              data: { formValues, isFallback: ragResult.isFallback },
+            };
+          }
+
+          const status: CaseStatusValue = "DRAFT";
+          const payload = toCasePayload(
+            aiDataForPersist!,
+            category.id,
+            caseOwnerId!,
+            status,
+            references,
+          );
+          const created = await prisma.$transaction((tx) => createCase(tx, payload));
+
+          return {
+            success: true,
+            message: ragResult.isFallback
+              ? "کیس به‌صورت پیش‌نویس ذخیره شد (بدون رفرنس اختصاصی — دانش عمومی مدل)"
+              : "کیس به‌صورت پیش‌نویس ذخیره شد",
+            data: {
+              case: serializeCase(created),
+              formValues,
+              caseId: created.id,
+              isFallback: ragResult.isFallback,
+            },
+          };
+        }
 
         if (!shouldPersist) {
           return {
@@ -191,7 +248,13 @@ export async function generateClinicalCaseAction(
         }
 
         const status: CaseStatusValue = isRemedial ? "PUBLISHED" : "DRAFT";
-        const payload = toCasePayload(aiData, category.id, caseOwnerId!, status);
+        const payload = toCasePayload(
+          aiDataForPersist!,
+          category.id,
+          caseOwnerId!,
+          status,
+          references,
+        );
         const created = await prisma.$transaction((tx) => createCase(tx, payload));
 
         return {
@@ -204,7 +267,7 @@ export async function generateClinicalCaseAction(
           {
             event: "case.generation.failed",
             userId: sessionUser.id,
-            err: serializeCaughtError(error),
+            err: serializeError(error),
           },
           "Clinical case generation failed",
         );
@@ -268,17 +331,31 @@ export async function generateClinicalCaseWithRAGAction(
           questionCount: 1,
         });
 
-        const formValues = mapAiCaseToFormValues(ragResult.case, category.id);
+        const references = ragResult.isFallback
+          ? FALLBACK_REFERENCE_NOTE
+          : ragResult.citationSources.join("\n") || null;
+        const formValues: CaseFormValues = {
+          ...mapAiCaseToFormValues(ragResult.case, category.id),
+          referencesText: references ?? "",
+        };
 
         if (!persist) {
           return {
             success: true,
-            message: "کیس RAG با موفقیت تولید شد؛ پیش از ذخیره بررسی کنید",
-            data: { formValues },
+            message: ragResult.isFallback
+              ? "کیس تولید شد، اما بر پایه دانش عمومی مدل و بدون رفرنس اختصاصی است"
+              : "کیس RAG با موفقیت تولید شد؛ پیش از ذخیره بررسی کنید",
+            data: { formValues, isFallback: ragResult.isFallback },
           };
         }
 
-        const payload = toCasePayload(ragResult.case, category.id, sessionUser.id, "DRAFT");
+        const payload = toCasePayload(
+          ragResult.case,
+          category.id,
+          sessionUser.id,
+          "DRAFT",
+          references,
+        );
 
         const created = await prisma.$transaction(async (tx) => {
           const kase = await createCase(tx, payload);
@@ -310,15 +387,22 @@ export async function generateClinicalCaseWithRAGAction(
 
         return {
           success: true,
-          message: "کیس RAG با استناد ذخیره شد",
-          data: { case: serializeCase(created), formValues, caseId: created.id },
+          message: ragResult.isFallback
+            ? "کیس به‌صورت پیش‌نویس ذخیره شد (بدون رفرنس اختصاصی — دانش عمومی مدل)"
+            : "کیس RAG با استناد ذخیره شد",
+          data: {
+            case: serializeCase(created),
+            formValues,
+            caseId: created.id,
+            isFallback: ragResult.isFallback,
+          },
         };
       } catch (error) {
         getLogger().error(
           {
             event: "case.generation.rag.failed",
             userId: sessionUser.id,
-            err: serializeCaughtError(error),
+            err: serializeError(error),
           },
           "RAG clinical case generation failed",
         );

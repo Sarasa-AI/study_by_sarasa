@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { answerOptions, type CaseFormValues } from "@/lib/case-schema";
 
+/** Instructor-facing note when RAG retrieval returns no clinical documents. */
+export const FALLBACK_REFERENCE_NOTE =
+  "تولید شده با دانش عمومی مدل - بدون رفرنس اختصاصی";
+
 export const aiCaseQuestionSchema = z
   .object({
     questionText: z.string().trim().min(1, "متن سوال الزامی است"),
@@ -12,12 +16,14 @@ export const aiCaseQuestionSchema = z
       errorMap: () => ({ message: "پاسخ صحیح باید A، B، C یا D باشد" }),
     }),
     explanation: z.string().trim().min(1, "توضیح پاسخ الزامی است"),
-    clinicalReasoning: z.string().trim().min(1, "استدلال بالینی الزامی است"),
+    // AI occasionally omits clinicalReasoning — accept missing/undefined and default to ""
+    clinicalReasoning: z.string().trim().optional().default(""),
+    // AI sometimes returns fewer than 3 distractor rationales — accept 0–3 keys,
+    // never fail the whole generation over a missing rationale entry.
     distractorRationales: z
       .record(z.enum(answerOptions), z.string().trim().min(1))
-      .refine((r) => Object.keys(r).length === 3, {
-        message: "باید برای هر سه گزینه نادرست rationale وجود داشته باشد",
-      }),
+      .optional()
+      .default({}),
   })
   .superRefine((question, ctx) => {
     const keys = Object.keys(question.distractorRationales);
@@ -131,6 +137,7 @@ export function mapAiCaseToFormValues(data: AiCaseGeneration, categoryId: string
     patientInfo: buildPatientInfoFromAi(data),
     mediaUrl: "",
     mediaType: "IMAGE",
+    referencesText: "",
     symptomsText: data.symptoms.join("\n"),
     diagnosis: data.diagnosis,
     differentialDiagnosisText: data.differentialDiagnosis.join("\n"),

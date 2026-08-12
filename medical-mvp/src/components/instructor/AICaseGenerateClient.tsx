@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
 import { CaseForm } from "@/components/instructor/CaseForm";
+import { AiProcessingIndicator } from "@/components/ui/AiProcessingIndicator";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/Textarea";
@@ -11,6 +11,7 @@ import {
   type GenerateAICaseActionInput,
 } from "@/lib/instructor-actions";
 import type { CaseDifficulty } from "@/lib/ai-case-generator";
+import { FALLBACK_REFERENCE_NOTE } from "@/lib/ai-schemas";
 import type { CaseFormValues } from "@/lib/case-schema";
 
 type Category = {
@@ -31,6 +32,12 @@ const DIFFICULTY_OPTIONS: { value: "" | CaseDifficulty; label: string }[] = [
   { value: "HARD", label: "سخت" },
 ];
 
+const GENERATION_MESSAGES = [
+  "در حال بازیابی منابع بالینی مرتبط...",
+  "در حال سنتز کیس بالینی با هوش مصنوعی...",
+  "در حال تدوین سوالات و پاسخ‌ها...",
+];
+
 export function AICaseGenerateClient({ categories, instructorId }: AICaseGenerateClientProps) {
   const [topic, setTopic] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -38,6 +45,7 @@ export function AICaseGenerateClient({ categories, instructorId }: AICaseGenerat
   const [difficulty, setDifficulty] = useState<"" | CaseDifficulty>("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [fallbackNotice, setFallbackNotice] = useState(false);
   const [draftValues, setDraftValues] = useState<CaseFormValues | null>(null);
   const [draftKey, setDraftKey] = useState(0);
 
@@ -53,6 +61,7 @@ export function AICaseGenerateClient({ categories, instructorId }: AICaseGenerat
 
     setIsGenerating(true);
     setServerError(null);
+    setFallbackNotice(false);
 
     const input: GenerateAICaseActionInput = {
       topic: topic.trim(),
@@ -68,6 +77,7 @@ export function AICaseGenerateClient({ categories, instructorId }: AICaseGenerat
         return;
       }
 
+      setFallbackNotice(Boolean(result.data.isFallback));
       setDraftValues(result.data.formValues);
       setDraftKey((key) => key + 1);
     } finally {
@@ -81,7 +91,8 @@ export function AICaseGenerateClient({ categories, instructorId }: AICaseGenerat
         <CardHeader>
           <h2 className="font-semibold">تولید هوشمند کیس بالینی</h2>
           <p className="text-sm text-slate-600">
-            موضوع را وارد کنید تا پیش‌نویس کامل کیس (همراه با MCQ و نکات آموزشی) تولید شود؛ سپس آن را ویرایش و ذخیره کنید.
+            موضوع را وارد کنید تا پیش‌نویس کامل کیس (همراه با MCQ و نکات آموزشی) تولید شود؛ سپس آن را
+            ویرایش و ذخیره کنید.
           </p>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
@@ -141,17 +152,11 @@ export function AICaseGenerateClient({ categories, instructorId }: AICaseGenerat
               ))}
             </select>
           </div>
-          <div className="md:col-span-2">
-            {serverError ? <p className="mb-3 text-sm text-red-600">{serverError}</p> : null}
+          <div className="md:col-span-2 space-y-3">
+            {serverError ? <p className="text-sm text-red-600">{serverError}</p> : null}
+            {isGenerating ? <AiProcessingIndicator messages={GENERATION_MESSAGES} /> : null}
             <Button type="button" disabled={isGenerating} onClick={handleGenerate}>
-              {isGenerating ? (
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  در حال تولید پیش‌نویس...
-                </span>
-              ) : (
-                "تولید پیش‌نویس کیس با AI"
-              )}
+              {isGenerating ? "در حال سنتز کیس بالینی..." : "تولید پیش‌نویس کیس با AI"}
             </Button>
           </div>
         </CardContent>
@@ -159,6 +164,14 @@ export function AICaseGenerateClient({ categories, instructorId }: AICaseGenerat
 
       {draftValues ? (
         <div className="space-y-3">
+          {fallbackNotice ? (
+            <div
+              role="status"
+              className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+            >
+              {FALLBACK_REFERENCE_NOTE}
+            </div>
+          ) : null}
           <div>
             <h2 className="text-xl font-semibold">پیش‌نمایش و ویرایش پیش‌نویس</h2>
             <p className="text-sm text-slate-600">

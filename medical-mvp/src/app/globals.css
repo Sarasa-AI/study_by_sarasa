@@ -31,6 +31,15 @@ body {
   @apply mx-auto max-w-6xl px-4;
 }
 
+@keyframes progress-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
 @media print {
   @page {
     margin: 1.5cm;

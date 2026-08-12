@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { scoreAnswers } from "@/lib/quiz";
@@ -41,6 +42,8 @@ export async function POST(req: Request) {
     update: { status: "COMPLETED", completedAt: new Date() },
     create: { userId, caseId, status: "COMPLETED", lastStep: 999, completedAt: new Date() },
   });
+
+  revalidateTag("cohort-analytics");
 
   return NextResponse.json({ id: result.id, score, total });
 }

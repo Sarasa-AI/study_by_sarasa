@@ -8,6 +8,7 @@ import { getSessionUser } from "@/lib/auth";
 import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { withServerAction } from "@/lib/server-action";
+import { serializeError } from "@/lib/serialize-error";
 
 export type DashboardStreak = {
   currentStreak: number;
@@ -32,12 +33,6 @@ async function resolveUserId(): Promise<string | null> {
   return user?.id ?? null;
 }
 
-function serializeCaughtError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message, stack: error.stack };
-  }
-  return { message: "UnknownError" };
-}
 
 export async function getDashboardStatsAction(): Promise<DashboardStatsResult> {
   const userId = await resolveUserId();
@@ -84,7 +79,7 @@ export async function getDashboardStatsAction(): Promise<DashboardStatsResult> {
           {
             event: "dashboard.stats.failed",
             userId,
-            err: serializeCaughtError(error),
+            err: serializeError(error),
           },
           "Dashboard stats failed",
         );

@@ -2,11 +2,13 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useCallback, useState, useTransition } from "react";
 import { submitFlashcardReviewAction } from "@/lib/flashcard-actions";
 import type { DueFlashcard, FlashcardRating } from "@/lib/flashcard-service";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
+import { useBodyScrollLock } from "@/lib/hooks/useBodyScrollLock";
+import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 type Props = {
   initialCards: DueFlashcard[];
@@ -66,6 +68,10 @@ export function FlashcardPlayer({ initialCards }: Props) {
   const [zoomOpen, setZoomOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  const closeZoom = useCallback(() => setZoomOpen(false), []);
+  useBodyScrollLock(zoomOpen);
+  useEscapeKey(closeZoom, zoomOpen);
 
   const card = cards[index];
   const remaining = cards.length - index;
@@ -171,7 +177,7 @@ export function FlashcardPlayer({ initialCards }: Props) {
           role="dialog"
           aria-modal="true"
           aria-label="نمایش بزرگ تصویر"
-          onClick={() => setZoomOpen(false)}
+          onClick={closeZoom}
         >
           <div
             className="relative h-[80vh] w-full max-w-4xl"
@@ -186,8 +192,8 @@ export function FlashcardPlayer({ initialCards }: Props) {
             />
             <Button
               variant="secondary"
-              className="absolute left-2 top-2"
-              onClick={() => setZoomOpen(false)}
+              className="absolute start-2 top-2 h-10 min-w-10"
+              onClick={closeZoom}
             >
               بستن
             </Button>

@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BarChart3, BookOpenCheck, Flame, Star, Target, Trophy } from "lucide-react";
-import { getDashboardStatsAction } from "@/app/actions/dashboard-stats";
-import { PerformanceChart } from "@/components/dashboard/PerformanceChart";
-import { TargetedPracticeButton } from "@/components/dashboard/TargetedPracticeButton";
+import { Activity, BarChart3, BookOpenCheck, Brain, Target, TrendingUp } from "lucide-react";
+import { CategoryPerformanceChart } from "@/components/dashboard/CategoryPerformanceChart";
+import { ScoreTrendChart } from "@/components/dashboard/ScoreTrendChart";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
+import {
+  getCategoryPerformance,
+  getScoreTrend,
+  getUserStats,
+} from "@/lib/analytics-actions";
 import { getSessionUser } from "@/lib/auth";
 import { getPendingMistakesCount } from "@/lib/practice-service";
 
@@ -17,17 +21,23 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  const [result, pendingMistakesCount] = await Promise.all([
-    getDashboardStatsAction(),
-    getPendingMistakesCount(userId),
-  ]);
-  if (!result.success || !result.data) {
+  const [statsResult, trendResult, categoryResult, pendingMistakesCount] =
+    await Promise.all([
+      getUserStats(),
+      getScoreTrend(),
+      getCategoryPerformance(),
+      getPendingMistakesCount(userId),
+    ]);
+
+  if (!statsResult.success || !trendResult.success || !categoryResult.success) {
     redirect("/login");
   }
 
-  const stats = result.data;
+  const stats = statsResult.data;
+  const scoreTrend = trendResult.data;
+  const categoryPerformance = categoryResult.data;
   const studentName = sessionUser?.name ?? "دانشجو";
-  const averageScorePercent = Math.round(stats.overallAccuracy * 100);
+  const averageScoreDisplay = Math.round(stats.averageScore);
 
   return (
     <div className="space-y-6">
@@ -36,56 +46,47 @@ export default async function DashboardPage() {
         <p className="mt-1 text-sm text-muted-foreground">خوش آمدید، {studentName}</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Trophy className="h-4 w-4" />
-              <span>Total Solved</span>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{stats.totalCasesCompleted}</div>
-            <p className="mt-1 text-xs text-muted-foreground">کیس تکمیل‌شده</p>
-          </CardContent>
-        </Card>
-
+      <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Target className="h-4 w-4" />
-              <span>Average Score</span>
+              <span>تعداد آزمون‌ها</span>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{averageScorePercent}%</div>
-            <p className="mt-1 text-xs text-muted-foreground">میانگین نمره کل</p>
+            <div className="text-3xl font-bold">
+              {stats.totalExams.toLocaleString("fa-IR")}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">آزمون تکمیل‌شده</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Star className="h-4 w-4" />
-              <span>Total XP</span>
+              <Activity className="h-4 w-4" />
+              <span>میانگین نمره</span>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{stats.totalXp}</div>
-            <p className="mt-1 text-xs text-muted-foreground">امتیاز تجربه کل</p>
+            <div className="text-3xl font-bold">{averageScoreDisplay}%</div>
+            <p className="mt-1 text-xs text-muted-foreground">میانگین نمرات آزمون</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Flame className="h-4 w-4" />
-              <span>Current Streak</span>
+              <Brain className="h-4 w-4" />
+              <span>تعداد سوالات</span>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{stats.streak.currentStreak}</div>
-            <p className="mt-1 text-xs text-muted-foreground">روز متوالی فعال</p>
+            <div className="text-3xl font-bold">
+              {stats.totalQuestionsAnswered.toLocaleString("fa-IR")}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">سوال پاسخ‌داده‌شده</p>
           </CardContent>
         </Card>
       </div>
@@ -109,66 +110,46 @@ export default async function DashboardPage() {
         </Card>
       )}
 
-      {stats.totalCasesCompleted === 0 && (
+      {stats.totalExams === 0 && (
         <Card className="border-primary/20 bg-accent">
           <CardContent className="flex flex-col items-start gap-3 py-6 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-foreground">اولین کیس خود را شروع کنید و عملکرد خود را پیگیری کنید.</p>
-            <Link href="/">
-              <Button>شروع یادگیری</Button>
+            <p className="text-sm text-foreground">
+              اولین آزمون خود را بدهید تا آمار و تحلیل عملکردتان را ببینید!
+            </p>
+            <Link href="/exams">
+              <Button>شروع آزمون</Button>
             </Link>
           </CardContent>
         </Card>
       )}
 
-      {stats.weakAreas.length > 0 && (
-        <Card className="border-amber-200 bg-amber-50">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
           <CardHeader>
-            <div className="font-semibold text-amber-900">نقاط ضعف</div>
-            <p className="text-sm text-amber-800">
-              در دسته‌بندی‌های زیر دقت شما کمتر از ۶۰٪ است. برای بهبود، کیس‌های این بخش‌ها را مرور کنید.
-            </p>
+            <div className="flex items-center gap-2 font-semibold">
+              <TrendingUp className="h-4 w-4" />
+              <span>روند نمرات</span>
+            </div>
+            <p className="text-sm text-muted-foreground">نمرات آزمون‌های اخیر شما</p>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {stats.weakAreas.map((area) => (
-              <div
-                key={area.categoryId}
-                className="flex flex-col gap-2 rounded-xl border border-amber-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div>
-                  <div className="font-medium">{area.name}</div>
-                  <div className="text-sm text-muted-foreground">
-                    دقت: {Math.round(area.accuracy * 100)}% · {area.attempts} تلاش
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Link href={`/category/${area.categoryId}`}>
-                    <Button variant="secondary" className="w-full sm:w-auto">
-                      مرور کیس‌ها
-                    </Button>
-                  </Link>
-                  <TargetedPracticeButton
-                    categoryId={area.categoryId}
-                    categoryName={area.name}
-                    className="w-full sm:w-auto"
-                  />
-                </div>
-              </div>
-            ))}
+          <CardContent>
+            <ScoreTrendChart data={scoreTrend} />
           </CardContent>
         </Card>
-      )}
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2 font-semibold">
-            <BarChart3 className="h-4 w-4" />
-            <span>عملکرد بر اساس دسته‌بندی</span>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <PerformanceChart data={stats.categoryAccuracy} weakAreas={stats.weakAreas} />
-        </CardContent>
-      </Card>
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2 font-semibold">
+              <BarChart3 className="h-4 w-4" />
+              <span>دقت بر اساس دسته‌بندی</span>
+            </div>
+            <p className="text-sm text-muted-foreground">نقاط قوت و ضعف موضوعی</p>
+          </CardHeader>
+          <CardContent>
+            <CategoryPerformanceChart data={categoryPerformance} />
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

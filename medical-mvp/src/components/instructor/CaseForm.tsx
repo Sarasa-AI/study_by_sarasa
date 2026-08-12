@@ -10,12 +10,12 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
+import { ClinicalImageField } from "@/components/instructor/ClinicalImageField";
 import {
   answerOptions,
   caseFormSchema,
   type CaseFormValues,
   type CaseStatusValue,
-  mediaTypeValues,
   toCaseFormValues,
 } from "@/lib/case-schema";
 import { createCaseAction, updateCaseAction } from "@/app/actions/case-actions";
@@ -64,6 +64,7 @@ export function CaseForm({
     control,
     handleSubmit,
     reset,
+    setValue,
     watch,
     formState: { errors },
   } = useForm<CaseFormValues>({
@@ -77,6 +78,7 @@ export function CaseForm({
   });
 
   const categoryId = watch("categoryId");
+  const mediaUrl = watch("mediaUrl");
   const isBusy = submittingStatus !== null || isGenerating;
 
   useEffect(() => {
@@ -204,25 +206,17 @@ export function CaseForm({
 
       <Card>
         <CardHeader>
-          <h2 className="font-semibold">بخش ۲: رسانه</h2>
+          <h2 className="font-semibold">بخش ۲: تصویر بالینی</h2>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm">آدرس رسانه</label>
-            <Input {...register("mediaUrl")} placeholder="https://example.com/media.jpg" />
-            {errors.mediaUrl ? <p className="mt-1 text-sm text-red-600">{errors.mediaUrl.message}</p> : null}
-          </div>
-          <div>
-            <label className="mb-2 block text-sm">نوع رسانه</label>
-            <div className="flex flex-wrap gap-3">
-              {mediaTypeValues.map((mediaType) => (
-                <label key={mediaType} className="flex items-center gap-2 text-sm">
-                  <input type="radio" value={mediaType} {...register("mediaType")} />
-                  <span>{mediaType}</span>
-                </label>
-              ))}
-            </div>
-          </div>
+        <CardContent>
+          <ClinicalImageField
+            value={mediaUrl}
+            onChange={(url) => {
+              setValue("mediaUrl", url, { shouldDirty: true, shouldValidate: true });
+              setValue("mediaType", url ? "IMAGE" : null, { shouldDirty: true });
+            }}
+            error={errors.mediaUrl?.message}
+          />
         </CardContent>
       </Card>
 
@@ -258,6 +252,25 @@ export function CaseForm({
             <Textarea {...register("teachingPointsText")} placeholder="هر مورد در یک خط" />
             {errors.teachingPointsText ? <p className="mt-1 text-sm text-red-600">{errors.teachingPointsText.message}</p> : null}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <h2 className="font-semibold">منابع و گایدلاین‌ها</h2>
+        </CardHeader>
+        <CardContent>
+          <p className="mb-3 text-sm text-slate-500">
+            منابع بازیابی‌شده از پایگاه دانش؛ پیش از انتشار بررسی کنید.
+          </p>
+          <Textarea
+            {...register("referencesText")}
+            placeholder="هر منبع یا گایدلاین در یک خط"
+            rows={4}
+          />
+          {errors.referencesText ? (
+            <p className="mt-1 text-sm text-red-600">{errors.referencesText.message}</p>
+          ) : null}
         </CardContent>
       </Card>
 

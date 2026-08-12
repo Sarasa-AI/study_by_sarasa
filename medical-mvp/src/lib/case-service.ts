@@ -1,4 +1,6 @@
 import { type CasePayload } from "@/lib/case-schema";
+import { embedAndStoreCase } from "@/lib/case-embedding";
+import { type Prisma } from "@prisma/client";
 
 type DbClient = {
   case: {
@@ -8,6 +10,10 @@ type DbClient = {
     update: (...args: any[]) => Promise<any>;
     delete: (...args: any[]) => Promise<any>;
   };
+  $executeRaw: (
+    query: TemplateStringsArray | Prisma.Sql,
+    ...values: unknown[]
+  ) => Promise<unknown>;
 };
 
 export const caseDetailsInclude = {
@@ -15,6 +21,12 @@ export const caseDetailsInclude = {
   questions: {
     orderBy: {
       orderIndex: "asc",
+    },
+  },
+  citations: {
+    select: {
+      text: true,
+      urlOrDoi: true,
     },
   },
   instructor: {
@@ -64,6 +76,7 @@ export function buildCaseCreateData(payload: CasePayload) {
     patientInfo: payload.patientInfo,
     mediaUrl: payload.mediaUrl,
     mediaType: payload.mediaType,
+    references: payload.references ?? null,
     symptoms: payload.symptoms,
     diagnosis: payload.diagnosis,
     differentialDiagnosis: payload.differentialDiagnosis,
@@ -92,14 +105,22 @@ export async function getCaseById(db: DbClient, id: string) {
 }
 
 export async function createCase(db: DbClient, payload: CasePayload) {
-  return db.case.create({
+  const created = await db.case.create({
     data: buildCaseCreateData(payload),
     include: caseDetailsInclude,
   });
+
+  if (payload.status !== "REJECTED") {
+    await embedAndStoreCase(db, created.id, payload);
+  } else {
+    await db.$executeRaw`UPDATE "Case" SET embedding = NULL WHERE id = ${created.id}`;
+  }
+
+  return created;
 }
 
 export async function updateCase(db: DbClient, id: string, payload: CasePayload) {
-  return db.case.update({
+  const updated = await db.case.update({
     where: { id },
     data: {
       ...buildCaseCreateData(payload),
@@ -110,6 +131,14 @@ export async function updateCase(db: DbClient, id: string, payload: CasePayload)
     },
     include: caseDetailsInclude,
   });
+
+  if (payload.status !== "REJECTED") {
+    await embedAndStoreCase(db, updated.id, payload);
+  } else {
+    await db.$executeRaw`UPDATE "Case" SET embedding = NULL WHERE id = ${id}`;
+  }
+
+  return updated;
 }
 
 export async function deleteCaseById(db: DbClient, id: string) {

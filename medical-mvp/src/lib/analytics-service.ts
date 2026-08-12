@@ -1,5 +1,6 @@
 import { ProgressStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getUnifiedWeakCategories } from "@/lib/unified-analytics";
 
 export type CategoryAccuracy = {
   categoryId: string;
@@ -347,8 +348,8 @@ export async function getWeeklyPerformanceContext(
 }
 
 export async function isCategoryWeakForUser(userId: string, categoryId: string): Promise<boolean> {
-  const stats = await getStudentPerformanceStats(userId);
-  return stats.weakAreas.some((area) => area.categoryId === categoryId);
+  const weakCategories = await getUnifiedWeakCategories(userId);
+  return weakCategories.some((area) => area.categoryId === categoryId);
 }
 
 export async function getUserAnalyticsData(

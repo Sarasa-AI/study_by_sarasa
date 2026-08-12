@@ -1,12 +1,10 @@
-import path from "node:path";
-import { createRequire } from "node:module";
 import pino from "pino";
 import { sanitizeLogContext } from "@/lib/log-sanitize";
 import { getRequestContext } from "@/lib/request-context";
+import { serializeError } from "@/lib/serialize-error";
 
 const isProduction = process.env.NODE_ENV === "production";
 const logLevel = process.env.LOG_LEVEL ?? (isProduction ? "info" : "debug");
-const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
 
 export type AppLogger = {
   debug: (obj: Record<string, unknown>, msg?: string) => void;
@@ -29,13 +27,12 @@ function createRootPino(): pino.Logger {
   }
 
   try {
-    // Absolute path so the worker thread can load pino-pretty outside Webpack.
-    const prettyTarget = nodeRequire.resolve("pino-pretty");
-
+    // pino/pino-pretty/thread-stream are server-externalized in next.config.mjs,
+    // so the worker can resolve this package name at runtime.
     return pino({
       ...baseOptions,
       transport: {
-        target: prettyTarget,
+        target: "pino-pretty",
         options: {
           colorize: true,
           translateTime: "SYS:standard",
@@ -93,6 +90,31 @@ export function createLogger(bindings?: Record<string, unknown>): AppLogger {
 
 export function getLogger(): AppLogger {
   return createLogger();
+}
+
+export type LogErrorParams = {
+  event: string;
+  operation?: string;
+  error: unknown;
+  msg?: string;
+  [key: string]: unknown;
+};
+
+/**
+ * Log an error with a consistent `err` shape (name, message, stack).
+ */
+export function logError(logger: AppLogger, params: LogErrorParams): void {
+  const { event, operation, error, msg, ...extra } = params;
+
+  logger.error(
+    {
+      event,
+      ...(typeof operation === "string" ? { operation } : {}),
+      ...extra,
+      err: serializeError(error),
+    },
+    typeof msg === "string" ? msg : typeof operation === "string" ? `${operation} failed` : event,
+  );
 }
 
 export { rootLogger };

@@ -2,7 +2,7 @@ import { z, type ZodError } from "zod";
 
 export const answerOptions = ["A", "B", "C", "D"] as const;
 export const mediaTypeValues = ["IMAGE", "VIDEO", "AUDIO"] as const;
-export const caseStatusValues = ["DRAFT", "PUBLISHED"] as const;
+export const caseStatusValues = ["DRAFT", "PUBLISHED", "REJECTED"] as const;
 export type MediaTypeValue = (typeof mediaTypeValues)[number];
 export type CaseStatusValue = (typeof caseStatusValues)[number];
 
@@ -53,9 +53,22 @@ export const casePayloadSchema = z.object({
     .trim()
     .optional()
     .nullable()
-    .refine((value) => !value || /^https?:\/\/.+/.test(value), "آدرس رسانه معتبر نیست")
+    .refine(
+      (value) =>
+        !value ||
+        /^https?:\/\/.+/.test(value) ||
+        /^\/uploads\/.+/i.test(value) ||
+        /^data:image\/(png|jpe?g);base64,/i.test(value),
+      "آدرس رسانه معتبر نیست",
+    )
     .transform((value) => value || null),
   mediaType: z.enum(mediaTypeValues).nullable().optional(),
+  references: z
+    .string()
+    .trim()
+    .nullable()
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : null)),
   symptoms: z.array(z.string().trim().min(1)).min(1, "حداقل یک علامت وارد کنید"),
   diagnosis: z.string().trim().min(1, "تشخیص الزامی است"),
   differentialDiagnosis: z.array(z.string().trim().min(1)).min(1, "حداقل یک تشخیص افتراقی وارد کنید"),
@@ -75,6 +88,7 @@ export const caseFormSchema = z.object({
   patientInfo: z.string().trim().min(1, "اطلاعات بیمار الزامی است"),
   mediaUrl: z.string().trim(),
   mediaType: z.enum(mediaTypeValues).nullable().optional(),
+  referencesText: z.string(),
   symptomsText: z.string().trim().min(1, "حداقل یک علامت وارد کنید"),
   diagnosis: z.string().trim().min(1, "تشخیص الزامی است"),
   differentialDiagnosisText: z.string().trim().min(1, "حداقل یک تشخیص افتراقی وارد کنید"),
@@ -86,6 +100,7 @@ export const caseFormSchema = z.object({
 export type CaseFormValues = z.infer<typeof caseFormSchema>;
 
 export function toCasePayload(formValues: CaseFormValues, instructorId: string, status: CaseStatusValue): CasePayload {
+  const references = formValues.referencesText?.trim() || null;
   return casePayloadSchema.parse({
     title: formValues.title,
     categoryId: formValues.categoryId,
@@ -94,6 +109,7 @@ export function toCasePayload(formValues: CaseFormValues, instructorId: string, 
     patientInfo: formValues.patientInfo,
     mediaUrl: formValues.mediaUrl?.trim() || null,
     mediaType: formValues.mediaUrl?.trim() ? formValues.mediaType ?? "IMAGE" : null,
+    references,
     symptoms: splitTextareaToArray(formValues.symptomsText),
     diagnosis: formValues.diagnosis,
     differentialDiagnosis: splitTextareaToArray(formValues.differentialDiagnosisText),
@@ -111,6 +127,7 @@ type CaseLike = {
   patientInfo: string;
   mediaUrl: string | null;
   mediaType: MediaTypeValue | null;
+  references?: string | null;
   symptoms: string[];
   diagnosis: string;
   differentialDiagnosis: string[];
@@ -139,6 +156,7 @@ export function toCaseFormValues(kase?: CaseLike | null): CaseFormValues {
       patientInfo: "",
       mediaUrl: "",
       mediaType: "IMAGE",
+      referencesText: "",
       symptomsText: "",
       diagnosis: "",
       differentialDiagnosisText: "",
@@ -167,6 +185,7 @@ export function toCaseFormValues(kase?: CaseLike | null): CaseFormValues {
     patientInfo: kase.patientInfo,
     mediaUrl: kase.mediaUrl ?? "",
     mediaType: kase.mediaType ?? "IMAGE",
+    referencesText: kase.references ?? "",
     symptomsText: joinArrayToTextarea(kase.symptoms),
     diagnosis: kase.diagnosis,
     differentialDiagnosisText: joinArrayToTextarea(kase.differentialDiagnosis),

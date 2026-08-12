@@ -1,5 +1,6 @@
 import { getLogger } from "@/lib/logger";
 import { runWithRequestId } from "@/lib/request-context";
+import { serializeError } from "@/lib/serialize-error";
 
 export type ServerActionOptions = {
   operation: string;
@@ -7,19 +8,7 @@ export type ServerActionOptions = {
   input?: Record<string, unknown>;
 };
 
-function serializeError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-    };
-  }
-
-  return {
-    message: typeof error === "string" ? error : "Unknown error",
-  };
-}
+export { serializeError };
 
 /**
  * Standard wrapper for server actions: binds request context, logs sanitized
