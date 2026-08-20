@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   if (!caseId || !answers) return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
 
   const kase = await prisma.case.findUnique({
-    where: { id: caseId },
+    where: { id: caseId, status: "PUBLISHED" },
     include: { questions: { orderBy: { orderIndex: "asc" }, select: { id: true, correctAnswer: true, points: true } } },
   });
   if (!kase) return NextResponse.json({ error: "Case not found" }, { status: 404 });

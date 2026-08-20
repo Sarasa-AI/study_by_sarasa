@@ -7,7 +7,7 @@ export default async function CategoryPage({ params }: { params: { id: string } 
     where: { id: params.id },
   });
   const cases = await prisma.case.findMany({
-    where: { categoryId: params.id },
+    where: { categoryId: params.id, status: "PUBLISHED" },
     orderBy: { createdAt: "desc" },
     select: { id: true, title: true, chiefComplaint: true, teachingPoints: true },
   });

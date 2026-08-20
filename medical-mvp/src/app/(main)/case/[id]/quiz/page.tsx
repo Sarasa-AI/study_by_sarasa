@@ -6,10 +6,11 @@ import { getCaseBookmarkAndNote } from "@/lib/bookmark-service";
 import { buildMentorCaseContext } from "@/lib/mentor-service";
 import { prisma } from "@/lib/prisma";
 import { serializeQuizQuestions } from "@/lib/quiz";
+import { notFound } from "next/navigation";
 
 export default async function QuizPage({ params }: { params: { id: string } }) {
   const kase = await prisma.case.findUnique({
-    where: { id: params.id },
+    where: { id: params.id, status: "PUBLISHED" },
     include: {
       questions: {
         orderBy: { orderIndex: "asc" },
@@ -18,7 +19,7 @@ export default async function QuizPage({ params }: { params: { id: string } }) {
   });
 
   if (!kase) {
-    return <div>کیس یافت نشد</div>;
+    notFound();
   }
 
   if (kase.questions.length === 0) {

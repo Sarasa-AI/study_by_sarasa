@@ -112,7 +112,7 @@ export async function submitQuizAction(
 
     try {
       const kase = await prisma.case.findUnique({
-        where: { id: caseId },
+        where: { id: caseId, status: "PUBLISHED" },
         include: {
           questions: {
             orderBy: { orderIndex: "asc" },

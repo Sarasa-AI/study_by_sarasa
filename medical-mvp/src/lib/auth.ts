@@ -41,31 +41,18 @@ export const authOptions: NextAuthOptions = {
         const role = resolveRoleFromStudentCode(studentCode);
         if (!name) return null;
 
-        const user = await prisma.user
-          .upsert({
-            where: studentCode ? { studentCode } : { id: "no-id" },
-            update: { name },
-            create: {
-              name,
-              role,
-              studentCode: studentCode ?? null,
-            },
-          })
-          .catch(async () => {
-            // Fallback when studentCode is null or unique constraint fails
-            const existing = await prisma.user.findFirst({
-              where: studentCode ? { studentCode } : { name },
+        // A name-only login is intentionally treated as a new anonymous
+        // student. Reusing a prior record by display name would let anyone
+        // who knows that name access the student's progress and results.
+        const user = studentCode
+          ? await prisma.user.upsert({
+              where: { studentCode },
+              update: { name },
+              create: { name, role, studentCode },
+            })
+          : await prisma.user.create({
+              data: { name, role: Role.STUDENT, studentCode: null },
             });
-            if (existing) {
-              return prisma.user.update({
-                where: { id: existing.id },
-                data: { name },
-              });
-            }
-            return prisma.user.create({
-              data: { name, role, studentCode: studentCode ?? null },
-            });
-          });
 
         return {
           id: user.id,
@@ -106,11 +93,20 @@ export const authOptions: NextAuthOptions = {
 export async function getSessionUser(): Promise<SessionUser | null> {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return null;
+
+  // The JWT is only an identity pointer. Read the current role from the
+  // database so role changes and revoked users take effect immediately.
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { id: true, name: true, role: true, studentCode: true },
+  });
+  if (!user) return null;
+
   return {
-    id: session.user.id,
-    name: session.user.name,
-    role: session.user.role ?? Role.STUDENT,
-    studentCode: session.user.studentCode,
+    id: user.id,
+    name: user.name,
+    role: user.role,
+    studentCode: user.studentCode,
   };
 }
 

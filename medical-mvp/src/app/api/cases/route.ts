@@ -5,9 +5,18 @@ import { createCase, listCases, serializeCase } from "@/lib/case-service";
 import { requireInstructorApi } from "@/lib/auth";
 
 export async function GET(req: Request) {
+  const instructor = await requireInstructorApi();
+  if (!instructor) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+  }
+
   const { searchParams } = new URL(req.url);
-  const instructorId = searchParams.get("instructorId");
-  const cases = await listCases(prisma, instructorId);
+  const requestedInstructorId = searchParams.get("instructorId");
+  if (requestedInstructorId && requestedInstructorId !== instructor.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const cases = await listCases(prisma, instructor.id);
   return NextResponse.json(cases.map((kase: Awaited<ReturnType<typeof listCases>>[number]) => serializeCase(kase)));
 }
 

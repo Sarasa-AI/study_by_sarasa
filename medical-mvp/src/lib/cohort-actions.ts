@@ -3,6 +3,7 @@
 import { ExamSessionStatus, Role } from "@prisma/client";
 import { unstable_cache } from "next/cache";
 import { requireInstructorApi } from "@/lib/auth";
+import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { withServerAction } from "@/lib/server-action";
 
@@ -220,7 +221,21 @@ export async function getClassAnalytics(): Promise<ClassAnalyticsResult> {
 
   return withServerAction(
     { operation: "cohort.getClassAnalytics", userId: instructor.id },
-    async () => ({ success: true as const, data: await getCachedClassAnalytics() }),
+    async () => {
+      try {
+        return { success: true as const, data: await getCachedClassAnalytics() };
+      } catch (error) {
+        getLogger().error(
+          {
+            event: "cohort.analytics.failed",
+            userId: instructor.id,
+            err: error instanceof Error ? { name: error.name, message: error.message } : error,
+          },
+          "Cohort analytics failed",
+        );
+        return { success: false as const, message: "خطا در بارگذاری تحلیل کلاس" };
+      }
+    },
   );
 }
 

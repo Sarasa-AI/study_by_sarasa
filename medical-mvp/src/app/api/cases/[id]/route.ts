@@ -5,8 +5,16 @@ import { deleteCaseById, getCaseById, serializeCase, updateCase } from "@/lib/ca
 import { requireInstructorApi } from "@/lib/auth";
 
 export async function GET(_: Request, { params }: { params: { id: string } }) {
+  const instructor = await requireInstructorApi();
+  if (!instructor) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+  }
+
   const kase = await getCaseById(prisma, params.id);
   if (!kase) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (kase.instructorId !== instructor.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   return NextResponse.json(serializeCase(kase));
 }
 

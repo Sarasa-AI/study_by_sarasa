@@ -1,7 +1,7 @@
 "use server";
 
 import { Prisma, Role } from "@prisma/client";
-import { revalidateTag } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { ZodError } from "zod";
 import {
   type CaseActionResult,
@@ -51,6 +51,16 @@ function authErrorMessage(code: string, action: "create" | "update"): string {
   return "فقط استادان می‌توانند کیس ایجاد یا ویرایش کنند";
 }
 
+function revalidateCaseMutationPaths(caseId?: string): void {
+  revalidatePath("/instructor");
+  revalidatePath("/instructor/reviews");
+  revalidatePath("/instructor/cases/new");
+  if (caseId) {
+    revalidatePath(`/instructor/cases/${caseId}/edit`);
+  }
+  revalidateTag("cohort-analytics");
+}
+
 export async function createCaseAction(values: CaseFormValues, status: CaseStatusValue): Promise<CaseActionResult> {
   const resolved = await resolveInstructorId();
   if ("error" in resolved) {
@@ -67,7 +77,7 @@ export async function createCaseAction(values: CaseFormValues, status: CaseStatu
       try {
         const payload = toCasePayload(values, resolved.id, status);
         const created = await prisma.$transaction((tx) => createCase(tx, payload));
-        revalidateTag("cohort-analytics");
+        revalidateCaseMutationPaths(created.id);
         return {
           success: true,
           message: status === "PUBLISHED" ? "کیس با موفقیت منتشر شد" : "پیش‌نویس ذخیره شد",
@@ -121,7 +131,7 @@ export async function deleteCaseAction(id: string): Promise<CaseActionResult> {
           await tx.case.delete({ where: { id } });
         });
 
-        revalidateTag("cohort-analytics");
+        revalidateCaseMutationPaths(id);
         return { success: true, message: "کیس با موفقیت حذف شد" };
       } catch (error) {
         getLogger().error(
@@ -167,7 +177,7 @@ export async function updateCaseAction(
 
         const payload = toCasePayload(values, resolved.id, status);
         const updated = await prisma.$transaction((tx) => updateCase(tx, id, payload));
-        revalidateTag("cohort-analytics");
+        revalidateCaseMutationPaths(id);
         return {
           success: true,
           message: status === "PUBLISHED" ? "کیس با موفقیت به‌روزرسانی شد" : "پیش‌نویس به‌روزرسانی شد",

@@ -1,6 +1,7 @@
 "use server";
 
 import { Prisma, Role } from "@prisma/client";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { z, type ZodError } from "zod";
 import { generateCaseWithAI, generateCaseWithRAG } from "@/lib/ai-case-generator";
 import {
@@ -225,6 +226,11 @@ export async function generateClinicalCaseAction(
           );
           const created = await prisma.$transaction((tx) => createCase(tx, payload));
 
+          revalidatePath("/instructor");
+          revalidatePath("/instructor/reviews");
+          revalidatePath(`/instructor/cases/${created.id}/edit`);
+          revalidateTag("cohort-analytics");
+
           return {
             success: true,
             message: ragResult.isFallback
@@ -256,6 +262,11 @@ export async function generateClinicalCaseAction(
           references,
         );
         const created = await prisma.$transaction((tx) => createCase(tx, payload));
+
+        revalidatePath("/instructor");
+        revalidatePath("/instructor/reviews");
+        revalidatePath(`/instructor/cases/${created.id}/edit`);
+        revalidateTag("cohort-analytics");
 
         return {
           success: true,
@@ -384,6 +395,11 @@ export async function generateClinicalCaseWithRAGAction(
 
           return kase;
         });
+
+        revalidatePath("/instructor");
+        revalidatePath("/instructor/reviews");
+        revalidatePath(`/instructor/cases/${created.id}/edit`);
+        revalidateTag("cohort-analytics");
 
         return {
           success: true,

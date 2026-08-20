@@ -7,14 +7,15 @@ import { ClinicalImageViewer } from "@/components/case/ClinicalImageViewer";
 import { PersonalNoteEditor } from "@/components/case/PersonalNoteEditor";
 import { getSessionUser } from "@/lib/auth";
 import { getCaseBookmarkAndNote } from "@/lib/bookmark-service";
+import { notFound } from "next/navigation";
 
 export default async function CasePage({ params }: { params: { id: string } }) {
   const kase = await prisma.case.findUnique({
-    where: { id: params.id },
+    where: { id: params.id, status: "PUBLISHED" },
     include: { questions: { orderBy: { orderIndex: "asc" } } },
   });
   if (!kase) {
-    return <div>کیس یافت نشد</div>;
+    notFound();
   }
 
   const sessionUser = await getSessionUser();

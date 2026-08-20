@@ -1,7 +1,7 @@
 "use server";
 
 import { ExamSessionStatus, Prisma } from "@prisma/client";
-import { revalidateTag } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { z, type ZodError } from "zod";
 import { getSessionUser } from "@/lib/auth";
 import { answerOptions, formatZodError } from "@/lib/case-schema";
@@ -24,6 +24,11 @@ export type StartExamResult =
   | {
       success: true;
       message: string;
+      data: {
+        sessionId: string;
+        durationMinutes: number;
+        questions: ExamQuestionPublic[];
+      };
       sessionId: string;
       durationMinutes: number;
       questions: ExamQuestionPublic[];
@@ -31,13 +36,20 @@ export type StartExamResult =
   | { success: false; message: string };
 
 export type SubmitAnswerResult =
-  | { success: true; message: string }
+  | { success: true; message: string; data: null }
   | { success: false; message: string };
 
 export type FinishExamResult =
   | {
       success: true;
       message: string;
+      data: {
+        score: number;
+        passed: boolean;
+        passingScore: number;
+        totalQuestions: number;
+        correctCount: number;
+      };
       score: number;
       passed: boolean;
       passingScore: number;
@@ -171,12 +183,17 @@ export async function startExam(examId: string): Promise<StartExamResult> {
 
         await updateStreak();
 
-        return {
-          success: true,
-          message: "جلسه آزمون شروع شد",
+        const data = {
           sessionId: session.id,
           durationMinutes: exam.durationMinutes,
           questions: exam.questions.map((eq) => toPublicQuestion(eq.question, eq.orderIndex)),
+        };
+
+        return {
+          success: true,
+          message: "جلسه آزمون شروع شد",
+          data,
+          ...data,
         };
       } catch (error) {
         logError(getLogger(), {
@@ -268,7 +285,7 @@ export async function submitAnswer(
           await recordExamAnswerXP(answer.id);
         }
 
-        return { success: true, message: "پاسخ ذخیره شد" };
+        return { success: true, message: "پاسخ ذخیره شد", data: null };
       } catch (error) {
         logError(getLogger(), {
           event: "examSession.submitAnswer.error",
@@ -324,14 +341,20 @@ export async function finishExam(sessionId: string): Promise<FinishExamResult> {
         const passed = score >= session.exam.passingScore;
 
         if (session.status === ExamSessionStatus.COMPLETED) {
-          return {
-            success: true,
-            message: "آزمون قبلاً پایان یافته است",
-            score: session.score ?? score,
-            passed: (session.score ?? score) >= session.exam.passingScore,
+          const completedScore = session.score ?? score;
+          const data = {
+            score: completedScore,
+            passed: completedScore >= session.exam.passingScore,
             passingScore: session.exam.passingScore,
             totalQuestions,
             correctCount,
+          };
+
+          return {
+            success: true,
+            message: "آزمون قبلاً پایان یافته است",
+            data,
+            ...data,
           };
         }
 
@@ -349,15 +372,24 @@ export async function finishExam(sessionId: string): Promise<FinishExamResult> {
         });
 
         revalidateTag("cohort-analytics");
+        revalidatePath("/analytics");
+        revalidatePath("/dashboard");
+        revalidatePath("/exams");
+        revalidatePath(`/exams/${session.id}/results`);
 
-        return {
-          success: true,
-          message: "آزمون با موفقیت پایان یافت",
+        const data = {
           score,
           passed,
           passingScore: session.exam.passingScore,
           totalQuestions,
           correctCount,
+        };
+
+        return {
+          success: true,
+          message: "آزمون با موفقیت پایان یافت",
+          data,
+          ...data,
         };
       } catch (error) {
         logError(getLogger(), {
