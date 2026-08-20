@@ -4,11 +4,11 @@ import { revalidatePath } from "next/cache";
 import { z, ZodError } from "zod";
 import { mapAiErrorToClientMessage } from "@/lib/ai-errors";
 import { requireInstructorApi } from "@/lib/auth";
-import { formatZodError, type CaseActionResult } from "@/lib/case-schema";
+import { formatZodError } from "@/lib/case-schema";
 import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { ingestClinicalText } from "@/lib/rag/ingester";
-import { withServerAction } from "@/lib/server-action";
+import { type ActionResult, withServerAction } from "@/lib/server-action";
 import { serializeError } from "@/lib/serialize-error";
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024; // 20 MB
@@ -20,9 +20,10 @@ const ingestKnowledgeSchema = z.object({
   categoryId: z.string().trim().optional(),
 });
 
-export type IngestKnowledgeResult = CaseActionResult & {
-  data?: { chunkCount: number; documentIds: string[] };
-};
+export type IngestKnowledgeResult = ActionResult<{
+  chunkCount: number;
+  documentIds: string[];
+}>;
 
 export type KnowledgeDocumentSummary = {
   title: string;
@@ -81,7 +82,11 @@ export async function ingestKnowledgeAction(
 ): Promise<IngestKnowledgeResult> {
   const user = await requireInstructorApi();
   if (!user) {
-    return { success: false, message: "فقط استادان می‌توانند پایگاه دانش را به‌روزرسانی کنند" };
+    return {
+      success: false,
+      message: "فقط استادان می‌توانند پایگاه دانش را به‌روزرسانی کنند",
+      data: null,
+    };
   }
 
   const title = String(formData.get("title") ?? "").trim();
@@ -110,10 +115,10 @@ export async function ingestKnowledgeAction(
 
         if (file) {
           if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-            return { success: false, message: "فقط فایل PDF پذیرفته می‌شود" };
+            return { success: false, message: "فقط فایل PDF پذیرفته می‌شود", data: null };
           }
           if (file.size > MAX_PDF_BYTES) {
-            return { success: false, message: "حجم فایل PDF نباید بیشتر از ۲۰ مگابایت باشد" };
+            return { success: false, message: "حجم فایل PDF نباید بیشتر از ۲۰ مگابایت باشد", data: null };
           }
 
           try {
@@ -131,6 +136,7 @@ export async function ingestKnowledgeAction(
             return {
               success: false,
               message: "استخراج متن از فایل PDF با خطا مواجه شد؛ فایل را بررسی کنید یا متن را به‌صورت دستی وارد کنید",
+              data: null,
             };
           }
 
@@ -138,6 +144,7 @@ export async function ingestKnowledgeAction(
             return {
               success: false,
               message: "متنی از فایل PDF استخراج نشد؛ ممکن است فایل اسکن‌شده (تصویری) باشد",
+              data: null,
             };
           }
         }
@@ -156,7 +163,7 @@ export async function ingestKnowledgeAction(
             select: { id: true, name: true },
           });
           if (!category) {
-            return { success: false, message: "دسته‌بندی یافت نشد" };
+            return { success: false, message: "دسته‌بندی یافت نشد", data: null };
           }
           categoryName = category.name;
         }
@@ -200,19 +207,19 @@ export async function ingestKnowledgeAction(
         );
 
         if (error instanceof ZodError) {
-          return { success: false, message: formatZodError(error) };
+          return { success: false, message: formatZodError(error), data: null };
         }
 
         if (error instanceof Error && error.message.includes("content produced no chunks")) {
-          return { success: false, message: "متن واردشده قابل تقسیم به بخش‌های معتبر نیست" };
+          return { success: false, message: "متن واردشده قابل تقسیم به بخش‌های معتبر نیست", data: null };
         }
 
         const aiMessage = mapAiErrorToClientMessage(error);
         if (aiMessage !== "خطای سرور") {
-          return { success: false, message: aiMessage };
+          return { success: false, message: aiMessage, data: null };
         }
 
-        return { success: false, message: "خطا در ذخیره و ایمبد سند" };
+        return { success: false, message: "خطا در ذخیره و ایمبد سند", data: null };
       }
     },
   );

@@ -5,7 +5,7 @@ import { unstable_cache } from "next/cache";
 import { requireInstructorApi } from "@/lib/auth";
 import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { withServerAction } from "@/lib/server-action";
+import { type ActionResult, withServerAction } from "@/lib/server-action";
 
 const WEAK_ACCURACY_THRESHOLD = 60;
 
@@ -31,9 +31,7 @@ export type ClassAnalyticsData = {
   studentRoster: StudentRosterItem[];
 };
 
-export type ClassAnalyticsResult =
-  | { success: true; data: ClassAnalyticsData }
-  | { success: false; message: string };
+export type ClassAnalyticsResult = ActionResult<ClassAnalyticsData>;
 
 type CategoryBucket = {
   categoryId: string;
@@ -216,6 +214,7 @@ export async function getClassAnalytics(): Promise<ClassAnalyticsResult> {
     return {
       success: false,
       message: "فقط استادان می‌توانند تحلیل کلاس را مشاهده کنند",
+      data: null,
     };
   }
 
@@ -223,7 +222,11 @@ export async function getClassAnalytics(): Promise<ClassAnalyticsResult> {
     { operation: "cohort.getClassAnalytics", userId: instructor.id },
     async () => {
       try {
-        return { success: true as const, data: await getCachedClassAnalytics() };
+        return {
+          success: true as const,
+          message: "تحلیل کلاس بارگذاری شد",
+          data: await getCachedClassAnalytics(),
+        };
       } catch (error) {
         getLogger().error(
           {
@@ -233,7 +236,11 @@ export async function getClassAnalytics(): Promise<ClassAnalyticsResult> {
           },
           "Cohort analytics failed",
         );
-        return { success: false as const, message: "خطا در بارگذاری تحلیل کلاس" };
+        return {
+          success: false as const,
+          message: "خطا در بارگذاری تحلیل کلاس",
+          data: null,
+        };
       }
     },
   );

@@ -8,6 +8,28 @@ export type ServerActionOptions = {
   input?: Record<string, unknown>;
 };
 
+export type ActionSuccess<T> = {
+  success: true;
+  message: string;
+  data: T;
+};
+
+export type ActionFailure = {
+  success: false;
+  message: string;
+  data: null;
+};
+
+export type ActionResult<T> = ActionSuccess<T> | ActionFailure;
+
+export function actionSuccess<T>(message: string, data: T): ActionSuccess<T> {
+  return { success: true, message, data };
+}
+
+export function actionFailure(message: string): ActionFailure {
+  return { success: false, message, data: null };
+}
+
 export { serializeError };
 
 /**

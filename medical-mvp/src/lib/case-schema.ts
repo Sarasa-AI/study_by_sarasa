@@ -1,4 +1,5 @@
 import { z, type ZodError } from "zod";
+import type { ActionResult } from "@/lib/server-action";
 
 export const answerOptions = ["A", "B", "C", "D"] as const;
 export const mediaTypeValues = ["IMAGE", "VIDEO", "AUDIO"] as const;
@@ -6,11 +7,7 @@ export const caseStatusValues = ["DRAFT", "PUBLISHED", "REJECTED"] as const;
 export type MediaTypeValue = (typeof mediaTypeValues)[number];
 export type CaseStatusValue = (typeof caseStatusValues)[number];
 
-export type CaseActionResult = {
-  success: boolean;
-  message: string;
-  data?: unknown;
-};
+export type CaseActionResult = ActionResult<unknown>;
 
 export function formatZodError(error: ZodError): string {
   return error.errors.map((issue) => issue.message).join("؛ ");

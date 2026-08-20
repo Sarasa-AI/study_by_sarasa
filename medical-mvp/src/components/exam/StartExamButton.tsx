@@ -23,7 +23,7 @@ export function StartExamButton({ examId }: StartExamButtonProps) {
         setError(result.message);
         return;
       }
-      router.push(`/exams/${result.sessionId}`);
+      router.push(`/exams/${result.data.sessionId}`);
     });
   }
 

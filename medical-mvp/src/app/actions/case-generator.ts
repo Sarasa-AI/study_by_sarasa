@@ -35,14 +35,16 @@ function urlOrDoiFromMetadata(metadata: Prisma.JsonValue): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-export type CaseGenerationResult = CaseActionResult & {
-  data?: {
+type CaseGenerationData = {
     formValues?: CaseFormValues;
     case?: unknown;
     caseId?: string;
     isFallback?: boolean;
-  };
 };
+
+export type CaseGenerationResult =
+  | { success: true; message: string; data: CaseGenerationData }
+  | { success: false; message: string; data: null };
 
 async function resolveSystemInstructorId(): Promise<string | null> {
   const instructor = await prisma.user.findFirst({
@@ -56,25 +58,25 @@ async function resolveSystemInstructorId(): Promise<string | null> {
 
 function handleGenerationError(error: unknown): CaseGenerationResult {
   if (error instanceof z.ZodError) {
-    return { success: false, message: formatZodError(error as ZodError) };
+    return { success: false, message: formatZodError(error as ZodError), data: null };
   }
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === "P2003") {
-      return { success: false, message: "دسته‌بندی انتخاب‌شده معتبر نیست" };
+      return { success: false, message: "دسته‌بندی انتخاب‌شده معتبر نیست", data: null };
     }
-    return { success: false, message: "خطا در ذخیره‌سازی داده" };
+    return { success: false, message: "خطا در ذخیره‌سازی داده", data: null };
   }
 
   const aiMessage = mapAiErrorToClientMessage(error);
   if (aiMessage !== "خطای سرور") {
-    return { success: false, message: aiMessage };
+    return { success: false, message: aiMessage, data: null };
   }
 
   if (error instanceof Error && error.message.includes("expected")) {
-    return { success: false, message: "تعداد سوالات تولیدشده با درخواست شما مطابقت ندارد؛ دوباره تلاش کنید" };
+    return { success: false, message: "تعداد سوالات تولیدشده با درخواست شما مطابقت ندارد؛ دوباره تلاش کنید", data: null };
   }
 
-  return { success: false, message: "خطای سرور" };
+  return { success: false, message: "خطای سرور", data: null };
 }
 
 function toCasePayload(
@@ -121,11 +123,11 @@ export async function generateClinicalCaseAction(
 ): Promise<CaseGenerationResult> {
   const sessionUser = await getSessionUser();
   if (!sessionUser) {
-    return { success: false, message: "برای تولید کیس باید وارد شوید" };
+    return { success: false, message: "برای تولید کیس باید وارد شوید", data: null };
   }
 
   if (!isRemedial && sessionUser.role !== Role.INSTRUCTOR) {
-    return { success: false, message: "فقط استادان می‌توانند کیس تولید کنند" };
+    return { success: false, message: "فقط استادان می‌توانند کیس تولید کنند", data: null };
   }
 
   return withServerAction(
@@ -142,7 +144,7 @@ export async function generateClinicalCaseAction(
     async () => {
       const trimmedCategoryId = categoryId?.trim();
       if (!trimmedCategoryId) {
-        return { success: false, message: "دسته‌بندی الزامی است" };
+        return { success: false, message: "دسته‌بندی الزامی است", data: null };
       }
 
       const shouldPersist = isRemedial || persist;
@@ -151,7 +153,7 @@ export async function generateClinicalCaseAction(
         if (isRemedial) {
           const isWeak = await isCategoryWeakForUser(sessionUser.id, trimmedCategoryId);
           if (!isWeak) {
-            return { success: false, message: "این دسته‌بندی در لیست نقاط ضعف شما نیست" };
+            return { success: false, message: "این دسته‌بندی در لیست نقاط ضعف شما نیست", data: null };
           }
         }
 
@@ -160,7 +162,7 @@ export async function generateClinicalCaseAction(
           select: { id: true, name: true },
         });
         if (!category) {
-          return { success: false, message: "دسته‌بندی یافت نشد" };
+          return { success: false, message: "دسته‌بندی یافت نشد", data: null };
         }
 
         let caseOwnerId: string | null = null;
@@ -169,7 +171,7 @@ export async function generateClinicalCaseAction(
             ? await resolveSystemInstructorId()
             : sessionUser.id;
           if (!caseOwnerId) {
-            return { success: false, message: "حساب استاد سیستمی برای ذخیره کیس یافت نشد" };
+            return { success: false, message: "حساب استاد سیستمی برای ذخیره کیس یافت نشد", data: null };
           }
         }
 
@@ -189,7 +191,7 @@ export async function generateClinicalCaseAction(
         } else {
           const trimmedTopic = topic?.trim() ?? "";
           if (!trimmedTopic) {
-            return { success: false, message: "موضوع یا سناریوی بالینی الزامی است" };
+            return { success: false, message: "موضوع یا سناریوی بالینی الزامی است", data: null };
           }
 
           const ragResult = await generateCaseWithRAG({
@@ -300,11 +302,11 @@ export async function generateClinicalCaseWithRAGAction(
 ): Promise<CaseGenerationResult> {
   const sessionUser = await getSessionUser();
   if (!sessionUser) {
-    return { success: false, message: "برای تولید کیس باید وارد شوید" };
+    return { success: false, message: "برای تولید کیس باید وارد شوید", data: null };
   }
 
   if (sessionUser.role !== Role.INSTRUCTOR) {
-    return { success: false, message: "فقط استادان می‌توانند کیس مبتنی بر RAG تولید کنند" };
+    return { success: false, message: "فقط استادان می‌توانند کیس مبتنی بر RAG تولید کنند", data: null };
   }
 
   return withServerAction(
@@ -321,10 +323,10 @@ export async function generateClinicalCaseWithRAGAction(
       const trimmedCategoryId = categoryId?.trim();
       const trimmedTopic = topic?.trim();
       if (!trimmedCategoryId) {
-        return { success: false, message: "دسته‌بندی الزامی است" };
+        return { success: false, message: "دسته‌بندی الزامی است", data: null };
       }
       if (!trimmedTopic) {
-        return { success: false, message: "موضوع (topic) برای تولید RAG الزامی است" };
+        return { success: false, message: "موضوع (topic) برای تولید RAG الزامی است", data: null };
       }
 
       try {
@@ -333,7 +335,7 @@ export async function generateClinicalCaseWithRAGAction(
           select: { id: true, name: true },
         });
         if (!category) {
-          return { success: false, message: "دسته‌بندی یافت نشد" };
+          return { success: false, message: "دسته‌بندی یافت نشد", data: null };
         }
 
         const ragResult = await generateCaseWithRAG({

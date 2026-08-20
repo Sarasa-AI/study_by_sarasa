@@ -1,14 +1,14 @@
 "use server";
 
 import { ExamSessionStatus, Prisma } from "@prisma/client";
-import { revalidatePath, revalidateTag } from "next/cache";
 import { z, type ZodError } from "zod";
 import { getSessionUser } from "@/lib/auth";
+import { invalidateStudentProgress } from "@/lib/cache-invalidation";
 import { answerOptions, formatZodError } from "@/lib/case-schema";
 import { recordExamAnswerXP, updateStreak } from "@/lib/gamification-actions";
 import { getLogger, logError } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { withServerAction } from "@/lib/server-action";
+import { type ActionResult, withServerAction } from "@/lib/server-action";
 
 export type ExamQuestionPublic = {
   id: string;
@@ -20,43 +20,23 @@ export type ExamQuestionPublic = {
   patientInfo: string | null;
 };
 
-export type StartExamResult =
-  | {
-      success: true;
-      message: string;
-      data: {
-        sessionId: string;
-        durationMinutes: number;
-        questions: ExamQuestionPublic[];
-      };
-      sessionId: string;
-      durationMinutes: number;
-      questions: ExamQuestionPublic[];
-    }
-  | { success: false; message: string };
+type StartExamData = {
+  sessionId: string;
+  durationMinutes: number;
+  questions: ExamQuestionPublic[];
+};
 
-export type SubmitAnswerResult =
-  | { success: true; message: string; data: null }
-  | { success: false; message: string };
+type FinishExamData = {
+  score: number;
+  passed: boolean;
+  passingScore: number;
+  totalQuestions: number;
+  correctCount: number;
+};
 
-export type FinishExamResult =
-  | {
-      success: true;
-      message: string;
-      data: {
-        score: number;
-        passed: boolean;
-        passingScore: number;
-        totalQuestions: number;
-        correctCount: number;
-      };
-      score: number;
-      passed: boolean;
-      passingScore: number;
-      totalQuestions: number;
-      correctCount: number;
-    }
-  | { success: false; message: string };
+export type StartExamResult = ActionResult<StartExamData>;
+export type SubmitAnswerResult = ActionResult<null>;
+export type FinishExamResult = ActionResult<FinishExamData>;
 
 const startExamSchema = z.object({
   examId: z.string().min(1, "شناسه آزمون الزامی است"),
@@ -74,16 +54,16 @@ const finishExamSchema = z.object({
   sessionId: z.string().min(1, "شناسه جلسه الزامی است"),
 });
 
-function handleExamSessionError(error: unknown): { success: false; message: string } {
+function handleExamSessionError(error: unknown): Extract<ActionResult<never>, { success: false }> {
   if (error instanceof z.ZodError) {
-    return { success: false, message: formatZodError(error as ZodError) };
+    return { success: false, message: formatZodError(error as ZodError), data: null };
   }
 
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
-    return { success: false, message: "خطا در ذخیره‌سازی جلسه آزمون" };
+    return { success: false, message: "خطا در ذخیره‌سازی جلسه آزمون", data: null };
   }
 
-  return { success: false, message: "خطای سرور" };
+  return { success: false, message: "خطای سرور", data: null };
 }
 
 function toPublicQuestion(
@@ -127,7 +107,7 @@ function toPublicQuestion(
 export async function startExam(examId: string): Promise<StartExamResult> {
   const user = await getSessionUser();
   if (!user?.id) {
-    return { success: false, message: "برای شرکت در آزمون باید وارد شوید" };
+    return { success: false, message: "برای شرکت در آزمون باید وارد شوید", data: null };
   }
 
   return withServerAction(
@@ -166,11 +146,11 @@ export async function startExam(examId: string): Promise<StartExamResult> {
         });
 
         if (!exam) {
-          return { success: false, message: "آزمون یافت نشد" };
+          return { success: false, message: "آزمون یافت نشد", data: null };
         }
 
         if (exam.questions.length === 0) {
-          return { success: false, message: "این آزمون هنوز سؤالی ندارد" };
+          return { success: false, message: "این آزمون هنوز سؤالی ندارد", data: null };
         }
 
         const session = await prisma.examSession.create({
@@ -193,7 +173,6 @@ export async function startExam(examId: string): Promise<StartExamResult> {
           success: true,
           message: "جلسه آزمون شروع شد",
           data,
-          ...data,
         };
       } catch (error) {
         logError(getLogger(), {
@@ -214,7 +193,7 @@ export async function submitAnswer(
 ): Promise<SubmitAnswerResult> {
   const user = await getSessionUser();
   if (!user?.id) {
-    return { success: false, message: "برای ثبت پاسخ باید وارد شوید" };
+    return { success: false, message: "برای ثبت پاسخ باید وارد شوید", data: null };
   }
 
   return withServerAction(
@@ -237,11 +216,11 @@ export async function submitAnswer(
         });
 
         if (!session) {
-          return { success: false, message: "جلسه آزمون یافت نشد" };
+          return { success: false, message: "جلسه آزمون یافت نشد", data: null };
         }
 
         if (session.status !== ExamSessionStatus.IN_PROGRESS) {
-          return { success: false, message: "این جلسه دیگر قابل ویرایش نیست" };
+          return { success: false, message: "این جلسه دیگر قابل ویرایش نیست", data: null };
         }
 
         const examQuestion = await prisma.examQuestion.findUnique({
@@ -257,7 +236,7 @@ export async function submitAnswer(
         });
 
         if (!examQuestion) {
-          return { success: false, message: "سؤال متعلق به این آزمون نیست" };
+          return { success: false, message: "سؤال متعلق به این آزمون نیست", data: null };
         }
 
         const isCorrect = examQuestion.question.correctAnswer === parsed.option;
@@ -301,7 +280,7 @@ export async function submitAnswer(
 export async function finishExam(sessionId: string): Promise<FinishExamResult> {
   const user = await getSessionUser();
   if (!user?.id) {
-    return { success: false, message: "برای پایان آزمون باید وارد شوید" };
+    return { success: false, message: "برای پایان آزمون باید وارد شوید", data: null };
   }
 
   return withServerAction(
@@ -331,7 +310,7 @@ export async function finishExam(sessionId: string): Promise<FinishExamResult> {
         });
 
         if (!session) {
-          return { success: false, message: "جلسه آزمون یافت نشد" };
+          return { success: false, message: "جلسه آزمون یافت نشد", data: null };
         }
 
         const totalQuestions = session.exam.questions.length;
@@ -354,12 +333,11 @@ export async function finishExam(sessionId: string): Promise<FinishExamResult> {
             success: true,
             message: "آزمون قبلاً پایان یافته است",
             data,
-            ...data,
           };
         }
 
         if (session.status !== ExamSessionStatus.IN_PROGRESS) {
-          return { success: false, message: "وضعیت جلسه برای پایان دادن معتبر نیست" };
+          return { success: false, message: "وضعیت جلسه برای پایان دادن معتبر نیست", data: null };
         }
 
         await prisma.examSession.update({
@@ -371,11 +349,7 @@ export async function finishExam(sessionId: string): Promise<FinishExamResult> {
           },
         });
 
-        revalidateTag("cohort-analytics");
-        revalidatePath("/analytics");
-        revalidatePath("/dashboard");
-        revalidatePath("/exams");
-        revalidatePath(`/exams/${session.id}/results`);
+        invalidateStudentProgress(session.id);
 
         const data = {
           score,
@@ -389,7 +363,6 @@ export async function finishExam(sessionId: string): Promise<FinishExamResult> {
           success: true,
           message: "آزمون با موفقیت پایان یافت",
           data,
-          ...data,
         };
       } catch (error) {
         logError(getLogger(), {

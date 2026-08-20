@@ -1,7 +1,6 @@
 "use server";
 
 import { Prisma, Role } from "@prisma/client";
-import { revalidatePath, revalidateTag } from "next/cache";
 import { ZodError } from "zod";
 import {
   type CaseActionResult,
@@ -11,6 +10,7 @@ import {
   toCasePayload,
 } from "@/lib/case-schema";
 import { createCase, getCaseById, serializeCase, updateCase } from "@/lib/case-service";
+import { invalidateCaseContent } from "@/lib/cache-invalidation";
 import { getSessionUser } from "@/lib/auth";
 import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
@@ -31,17 +31,17 @@ async function resolveInstructorId(): Promise<{ id: string } | { error: string }
 
 function handleActionError(error: unknown): CaseActionResult {
   if (error instanceof ZodError) {
-    return { success: false, message: formatZodError(error) };
+    return { success: false, message: formatZodError(error), data: null };
   }
 
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === "P2003") {
-      return { success: false, message: "دسته‌بندی انتخاب‌شده معتبر نیست" };
+      return { success: false, message: "دسته‌بندی انتخاب‌شده معتبر نیست", data: null };
     }
-    return { success: false, message: "خطا در ذخیره‌سازی داده" };
+    return { success: false, message: "خطا در ذخیره‌سازی داده", data: null };
   }
 
-  return { success: false, message: "خطای سرور" };
+  return { success: false, message: "خطای سرور", data: null };
 }
 
 function authErrorMessage(code: string, action: "create" | "update"): string {
@@ -51,20 +51,10 @@ function authErrorMessage(code: string, action: "create" | "update"): string {
   return "فقط استادان می‌توانند کیس ایجاد یا ویرایش کنند";
 }
 
-function revalidateCaseMutationPaths(caseId?: string): void {
-  revalidatePath("/instructor");
-  revalidatePath("/instructor/reviews");
-  revalidatePath("/instructor/cases/new");
-  if (caseId) {
-    revalidatePath(`/instructor/cases/${caseId}/edit`);
-  }
-  revalidateTag("cohort-analytics");
-}
-
 export async function createCaseAction(values: CaseFormValues, status: CaseStatusValue): Promise<CaseActionResult> {
   const resolved = await resolveInstructorId();
   if ("error" in resolved) {
-    return { success: false, message: authErrorMessage(resolved.error, "create") };
+    return { success: false, message: authErrorMessage(resolved.error, "create"), data: null };
   }
 
   return withServerAction(
@@ -77,7 +67,7 @@ export async function createCaseAction(values: CaseFormValues, status: CaseStatu
       try {
         const payload = toCasePayload(values, resolved.id, status);
         const created = await prisma.$transaction((tx) => createCase(tx, payload));
-        revalidateCaseMutationPaths(created.id);
+        invalidateCaseContent(created.id);
         return {
           success: true,
           message: status === "PUBLISHED" ? "کیس با موفقیت منتشر شد" : "پیش‌نویس ذخیره شد",
@@ -101,7 +91,7 @@ export async function createCaseAction(values: CaseFormValues, status: CaseStatu
 export async function deleteCaseAction(id: string): Promise<CaseActionResult> {
   const resolved = await resolveInstructorId();
   if ("error" in resolved) {
-    return { success: false, message: authErrorMessage(resolved.error, "update") };
+    return { success: false, message: authErrorMessage(resolved.error, "update"), data: null };
   }
 
   return withServerAction(
@@ -114,10 +104,10 @@ export async function deleteCaseAction(id: string): Promise<CaseActionResult> {
       try {
         const existing = await getCaseById(prisma, id);
         if (!existing) {
-          return { success: false, message: "کیس یافت نشد" };
+          return { success: false, message: "کیس یافت نشد", data: null };
         }
         if (existing.instructorId !== resolved.id) {
-          return { success: false, message: "شما اجازه حذف این کیس را ندارید" };
+          return { success: false, message: "شما اجازه حذف این کیس را ندارید", data: null };
         }
 
         await prisma.$transaction(async (tx) => {
@@ -131,8 +121,8 @@ export async function deleteCaseAction(id: string): Promise<CaseActionResult> {
           await tx.case.delete({ where: { id } });
         });
 
-        revalidateCaseMutationPaths(id);
-        return { success: true, message: "کیس با موفقیت حذف شد" };
+        invalidateCaseContent(id);
+        return { success: true, message: "کیس با موفقیت حذف شد", data: null };
       } catch (error) {
         getLogger().error(
           {
@@ -156,7 +146,7 @@ export async function updateCaseAction(
 ): Promise<CaseActionResult> {
   const resolved = await resolveInstructorId();
   if ("error" in resolved) {
-    return { success: false, message: authErrorMessage(resolved.error, "update") };
+    return { success: false, message: authErrorMessage(resolved.error, "update"), data: null };
   }
 
   return withServerAction(
@@ -169,15 +159,15 @@ export async function updateCaseAction(
       try {
         const existing = await getCaseById(prisma, id);
         if (!existing) {
-          return { success: false, message: "کیس یافت نشد" };
+          return { success: false, message: "کیس یافت نشد", data: null };
         }
         if (existing.instructorId !== resolved.id) {
-          return { success: false, message: "شما اجازه ویرایش این کیس را ندارید" };
+          return { success: false, message: "شما اجازه ویرایش این کیس را ندارید", data: null };
         }
 
         const payload = toCasePayload(values, resolved.id, status);
         const updated = await prisma.$transaction((tx) => updateCase(tx, id, payload));
-        revalidateCaseMutationPaths(id);
+        invalidateCaseContent(id);
         return {
           success: true,
           message: status === "PUBLISHED" ? "کیس با موفقیت به‌روزرسانی شد" : "پیش‌نویس به‌روزرسانی شد",

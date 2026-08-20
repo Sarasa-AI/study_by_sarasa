@@ -2,8 +2,10 @@
 
 import { ExamSessionStatus } from "@prisma/client";
 import { getSessionUser } from "@/lib/auth";
+import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { withServerAction } from "@/lib/server-action";
+import { type ActionResult, withServerAction } from "@/lib/server-action";
+import { serializeError } from "@/lib/serialize-error";
 import { getUnifiedCategoryPerformance } from "@/lib/unified-analytics";
 
 const SCORE_TREND_LIMIT = 20;
@@ -29,56 +31,57 @@ export type CategoryPerformanceItem = {
   accuracy: number;
 };
 
-export type UserStatsResult =
-  | { success: true; data: UserStatsData }
-  | { success: false; message: string };
-
-export type ScoreTrendResult =
-  | { success: true; data: ScoreTrendPoint[] }
-  | { success: false; message: string };
-
-export type CategoryPerformanceResult =
-  | { success: true; data: CategoryPerformanceItem[] }
-  | { success: false; message: string };
+export type UserStatsResult = ActionResult<UserStatsData>;
+export type ScoreTrendResult = ActionResult<ScoreTrendPoint[]>;
+export type CategoryPerformanceResult = ActionResult<CategoryPerformanceItem[]>;
 
 export async function getUserStats(): Promise<UserStatsResult> {
   const user = await getSessionUser();
   if (!user?.id) {
-    return { success: false, message: "برای مشاهده آمار باید وارد شوید" };
+    return { success: false, message: "برای مشاهده آمار باید وارد شوید", data: null };
   }
 
   return withServerAction(
     { operation: "analytics.userStats", userId: user.id },
     async () => {
-      const completedWhere = {
-        userId: user.id,
-        status: ExamSessionStatus.COMPLETED,
-      };
+      try {
+        const completedWhere = {
+          userId: user.id,
+          status: ExamSessionStatus.COMPLETED,
+        };
 
-      const [totalExams, scoreAgg, totalQuestionsAnswered] = await Promise.all([
-        prisma.examSession.count({ where: completedWhere }),
-        prisma.examSession.aggregate({
-          where: {
-            ...completedWhere,
-            score: { not: null },
-          },
-          _avg: { score: true },
-        }),
-        prisma.examAnswer.count({
-          where: {
-            session: completedWhere,
-          },
-        }),
-      ]);
+        const [totalExams, scoreAgg, totalQuestionsAnswered] = await Promise.all([
+          prisma.examSession.count({ where: completedWhere }),
+          prisma.examSession.aggregate({
+            where: {
+              ...completedWhere,
+              score: { not: null },
+            },
+            _avg: { score: true },
+          }),
+          prisma.examAnswer.count({
+            where: {
+              session: completedWhere,
+            },
+          }),
+        ]);
 
-      return {
-        success: true as const,
-        data: {
-          totalExams,
-          averageScore: Math.round((scoreAgg._avg.score ?? 0) * 100) / 100,
-          totalQuestionsAnswered,
-        },
-      };
+        return {
+          success: true as const,
+          message: "آمار کاربر بارگذاری شد",
+          data: {
+            totalExams,
+            averageScore: Math.round((scoreAgg._avg.score ?? 0) * 100) / 100,
+            totalQuestionsAnswered,
+          },
+        };
+      } catch (error) {
+        getLogger().error(
+          { event: "analytics.user_stats.failed", userId: user.id, err: serializeError(error) },
+          "User analytics stats failed",
+        );
+        return { success: false as const, message: "خطا در بارگذاری آمار", data: null };
+      }
     },
   );
 }
@@ -86,40 +89,49 @@ export async function getUserStats(): Promise<UserStatsResult> {
 export async function getScoreTrend(): Promise<ScoreTrendResult> {
   const user = await getSessionUser();
   if (!user?.id) {
-    return { success: false, message: "برای مشاهده روند نمرات باید وارد شوید" };
+    return { success: false, message: "برای مشاهده روند نمرات باید وارد شوید", data: null };
   }
 
   return withServerAction(
     { operation: "analytics.scoreTrend", userId: user.id },
     async () => {
-      const sessions = await prisma.examSession.findMany({
-        where: {
-          userId: user.id,
-          status: ExamSessionStatus.COMPLETED,
-          completedAt: { not: null },
-          score: { not: null },
-        },
-        orderBy: { completedAt: "desc" },
-        take: SCORE_TREND_LIMIT,
-        select: {
-          id: true,
-          score: true,
-          completedAt: true,
-          exam: { select: { title: true } },
-        },
-      });
+      try {
+        const sessions = await prisma.examSession.findMany({
+          where: {
+            userId: user.id,
+            status: ExamSessionStatus.COMPLETED,
+            completedAt: { not: null },
+            score: { not: null },
+          },
+          orderBy: { completedAt: "desc" },
+          take: SCORE_TREND_LIMIT,
+          select: {
+            id: true,
+            score: true,
+            completedAt: true,
+            exam: { select: { title: true } },
+          },
+        });
 
-      const chronological = [...sessions].reverse();
+        const data = [...sessions].reverse().flatMap((session) =>
+          session.completedAt && session.score != null
+            ? [{
+                sessionId: session.id,
+                examTitle: session.exam.title,
+                completedAt: session.completedAt.toISOString(),
+                score: session.score,
+              }]
+            : [],
+        );
 
-      return {
-        success: true as const,
-        data: chronological.map((session) => ({
-          sessionId: session.id,
-          examTitle: session.exam.title,
-          completedAt: session.completedAt!.toISOString(),
-          score: session.score!,
-        })),
-      };
+        return { success: true as const, message: "روند نمرات بارگذاری شد", data };
+      } catch (error) {
+        getLogger().error(
+          { event: "analytics.score_trend.failed", userId: user.id, err: serializeError(error) },
+          "Score trend failed",
+        );
+        return { success: false as const, message: "خطا در بارگذاری روند نمرات", data: null };
+      }
     },
   );
 }
@@ -127,14 +139,26 @@ export async function getScoreTrend(): Promise<ScoreTrendResult> {
 export async function getCategoryPerformance(): Promise<CategoryPerformanceResult> {
   const user = await getSessionUser();
   if (!user?.id) {
-    return { success: false, message: "برای مشاهده عملکرد دسته‌بندی باید وارد شوید" };
+    return { success: false, message: "برای مشاهده عملکرد دسته‌بندی باید وارد شوید", data: null };
   }
 
   return withServerAction(
     { operation: "analytics.categoryPerformance", userId: user.id },
     async () => {
-      const data = await getUnifiedCategoryPerformance(user.id);
-      return { success: true as const, data };
+      try {
+        const data = await getUnifiedCategoryPerformance(user.id);
+        return { success: true as const, message: "عملکرد دسته‌بندی بارگذاری شد", data };
+      } catch (error) {
+        getLogger().error(
+          { event: "analytics.category_performance.failed", userId: user.id, err: serializeError(error) },
+          "Category performance failed",
+        );
+        return {
+          success: false as const,
+          message: "خطا در بارگذاری عملکرد دسته‌بندی",
+          data: null,
+        };
+      }
     },
   );
 }

@@ -31,29 +31,31 @@ export type GenerateAICaseActionInput = {
   questionCount?: number;
 };
 
-export type GenerateAICaseActionResult = CaseActionResult & {
-  data?: {
+type GenerateAICaseActionData = {
     formValues?: CaseFormValues;
     isFallback?: boolean;
-  };
 };
+
+export type GenerateAICaseActionResult =
+  | { success: true; message: string; data: GenerateAICaseActionData }
+  | { success: false; message: string; data: null };
 
 
 function handleGenerationError(error: unknown): GenerateAICaseActionResult {
   if (error instanceof z.ZodError) {
-    return { success: false, message: formatZodError(error as ZodError) };
+    return { success: false, message: formatZodError(error as ZodError), data: null };
   }
 
   const aiMessage = mapAiErrorToClientMessage(error);
   if (aiMessage !== "خطای سرور") {
-    return { success: false, message: aiMessage };
+    return { success: false, message: aiMessage, data: null };
   }
 
   if (error instanceof Error && error.message.includes("expected")) {
-    return { success: false, message: "تعداد سوالات تولیدشده با درخواست شما مطابقت ندارد؛ دوباره تلاش کنید" };
+    return { success: false, message: "تعداد سوالات تولیدشده با درخواست شما مطابقت ندارد؛ دوباره تلاش کنید", data: null };
   }
 
-  return { success: false, message: "خطای سرور" };
+  return { success: false, message: "خطای سرور", data: null };
 }
 
 export async function generateAICaseAction(
@@ -61,11 +63,11 @@ export async function generateAICaseAction(
 ): Promise<GenerateAICaseActionResult> {
   const sessionUser = await getSessionUser();
   if (!sessionUser) {
-    return { success: false, message: "برای تولید کیس باید وارد شوید" };
+    return { success: false, message: "برای تولید کیس باید وارد شوید", data: null };
   }
 
   if (sessionUser.role !== Role.INSTRUCTOR) {
-    return { success: false, message: "فقط استادان می‌توانند کیس تولید کنند" };
+    return { success: false, message: "فقط استادان می‌توانند کیس تولید کنند", data: null };
   }
 
   return withServerAction(
@@ -82,12 +84,12 @@ export async function generateAICaseAction(
     async () => {
       const topic = input.topic?.trim() ?? "";
       if (!topic) {
-        return { success: false, message: "موضوع یا سناریوی بالینی الزامی است" };
+        return { success: false, message: "موضوع یا سناریوی بالینی الزامی است", data: null };
       }
 
       const categoryId = input.categoryId?.trim() ?? "";
       if (!categoryId) {
-        return { success: false, message: "دسته‌بندی الزامی است" };
+        return { success: false, message: "دسته‌بندی الزامی است", data: null };
       }
 
       try {
@@ -96,7 +98,7 @@ export async function generateAICaseAction(
           select: { id: true, name: true },
         });
         if (!category) {
-          return { success: false, message: "دسته‌بندی یافت نشد" };
+          return { success: false, message: "دسته‌بندی یافت نشد", data: null };
         }
 
         const rag = await generateCaseWithRAG({
@@ -187,17 +189,17 @@ export type CaseForEdit = {
 
 function handleReviewActionError(error: unknown): CaseActionResult {
   if (error instanceof ZodError) {
-    return { success: false, message: formatZodError(error) };
+    return { success: false, message: formatZodError(error), data: null };
   }
 
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === "P2003") {
-      return { success: false, message: "دسته‌بندی انتخاب‌شده معتبر نیست" };
+      return { success: false, message: "دسته‌بندی انتخاب‌شده معتبر نیست", data: null };
     }
-    return { success: false, message: "خطا در ذخیره‌سازی داده" };
+    return { success: false, message: "خطا در ذخیره‌سازی داده", data: null };
   }
 
-  return { success: false, message: "خطای سرور" };
+  return { success: false, message: "خطای سرور", data: null };
 }
 
 /** Pending review queue: DRAFT / IN_REVIEW only (excludes PUBLISHED and REJECTED). */
@@ -303,7 +305,7 @@ export async function setCaseStatusAction(
 ): Promise<CaseActionResult> {
   const user = await requireInstructorApi();
   if (!user) {
-    return { success: false, message: "فقط استادان می‌توانند کیس را بررسی و منتشر کنند" };
+    return { success: false, message: "فقط استادان می‌توانند کیس را بررسی و منتشر کنند", data: null };
   }
 
   return withServerAction(
@@ -330,7 +332,7 @@ export async function setCaseStatusAction(
           },
         });
         if (!existing) {
-          return { success: false, message: "کیس یافت نشد" };
+          return { success: false, message: "کیس یافت نشد", data: null };
         }
 
         const previousStatus = existing.status;
@@ -371,7 +373,7 @@ export async function setCaseStatusAction(
               ? "کیس با موفقیت رد و بایگانی شد"
               : "پیش‌نویس با موفقیت ذخیره شد";
 
-        return { success: true, message };
+        return { success: true, message, data: null };
       } catch (error) {
         getLogger().error(
           {
@@ -393,7 +395,7 @@ export async function setCaseStatusAction(
 export async function deleteCaseAction(caseId: string): Promise<CaseActionResult> {
   const user = await requireInstructorApi();
   if (!user) {
-    return { success: false, message: "فقط استادان می‌توانند کیس را حذف کنند" };
+    return { success: false, message: "فقط استادان می‌توانند کیس را حذف کنند", data: null };
   }
 
   return withServerAction(
@@ -409,14 +411,14 @@ export async function deleteCaseAction(caseId: string): Promise<CaseActionResult
           select: { id: true },
         });
         if (!existing) {
-          return { success: false, message: "کیس یافت نشد" };
+          return { success: false, message: "کیس یافت نشد", data: null };
         }
 
         await deleteCaseById(prisma, caseId);
         revalidatePath("/instructor/reviews");
         revalidateTag("cohort-analytics");
 
-        return { success: true, message: "کیس با موفقیت حذف شد" };
+        return { success: true, message: "کیس با موفقیت حذف شد", data: null };
       } catch (error) {
         getLogger().error(
           {
@@ -511,7 +513,7 @@ export async function updateAndPublishCase(
 ): Promise<CaseActionResult> {
   const user = await requireInstructorApi();
   if (!user) {
-    return { success: false, message: "فقط استادان می‌توانند کیس را بررسی و منتشر کنند" };
+    return { success: false, message: "فقط استادان می‌توانند کیس را بررسی و منتشر کنند", data: null };
   }
 
   return withServerAction(
@@ -527,7 +529,7 @@ export async function updateAndPublishCase(
           select: { id: true, instructorId: true },
         });
         if (!existing) {
-          return { success: false, message: "کیس یافت نشد" };
+          return { success: false, message: "کیس یافت نشد", data: null };
         }
 
         const payload = toCasePayload(values, existing.instructorId, status);
