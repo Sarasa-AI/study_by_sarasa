@@ -87,19 +87,27 @@ export function ExamRunner({
     }
   }, [router, sessionId]);
 
+  // Wrap finalizeExam to handle unhandled rejections from timer auto-submit
+  const handleAutoFinalize = useCallback(() => {
+    finalizeExam().catch((err) => {
+      // Prevent unhandled promise rejection warning
+      console.error("Auto-finalize exam failed:", err);
+    });
+  }, [finalizeExam]);
+
   useEffect(() => {
     const tick = () => {
       const next = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
       setRemainingSeconds(next);
       if (next <= 0) {
-        void finalizeExam();
+        handleAutoFinalize();
       }
     };
 
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [endsAt, finalizeExam]);
+  }, [endsAt, handleAutoFinalize]);
 
   useEffect(() => {
     function onVisibilityChange() {
@@ -150,29 +158,19 @@ export function ExamRunner({
           </div>
 
           <div className="flex flex-wrap gap-1.5">
-            {questions.map((question, index) => {
-              const isAnswered = Boolean(answers[question.id]);
-              const isCurrent = index === currentIndex;
-
-              return (
-                <button
-                  key={question.id}
-                  type="button"
-                  onClick={() => setCurrentIndex(index)}
-                  className={cn(
-                    "flex h-8 w-8 items-center justify-center rounded-md text-xs font-medium",
-                    isCurrent
-                      ? "bg-teal-700 text-white"
-                      : isAnswered
-                        ? "bg-teal-100 text-teal-900"
-                        : "bg-slate-100 text-slate-600",
-                  )}
-                  aria-label={`سؤال ${index + 1}`}
-                >
-                  {(index + 1).toLocaleString("fa-IR")}
-                </button>
-              );
-            })}
+            {questions.map((question, index) => (
+              <Button
+                key={question.id}
+                type="button"
+                variant={index === currentIndex ? "primary" : "secondary"}
+                
+                className="gap-1"
+                onClick={() => setCurrentIndex(index)}
+                aria-label={`سؤال ${index + 1}`}
+              >
+                {index + 1}
+              </Button>
+            ))}
           </div>
         </div>
       </header>
@@ -207,12 +205,10 @@ export function ExamRunner({
           {questions.length.toLocaleString("fa-IR")}
         </div>
 
-        {currentQuestion.chiefComplaint ||
-        currentQuestion.patientInfo ||
-        currentQuestion.mediaUrl ? (
-          <Card className="border-teal-100 bg-teal-50/40">
+        {currentQuestion.chiefComplaint || currentQuestion.patientInfo || currentQuestion.mediaUrl ? (
+          <Card>
             <CardHeader>
-              <div className="text-sm font-semibold text-teal-900">سناریوی بالینی</div>
+              <div className="font-semibold text-slate-900">ویزیت بیمار</div>
             </CardHeader>
             <CardContent className="space-y-3">
               {currentQuestion.chiefComplaint ? (

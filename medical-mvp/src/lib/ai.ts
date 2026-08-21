@@ -10,7 +10,8 @@ export type AIGatewayErrorCode =
   | "NETWORK_ERROR"
   | "PARSE_ERROR"
   | "VALIDATION_ERROR"
-  | "API_ERROR";
+  | "API_ERROR"
+  | "TIMEOUT";
 
 export type AIGatewayOperation = "case-generation" | "mentor-reply" | "weekly-digest";
 
@@ -78,6 +79,8 @@ type GenerateStructuredDataParams<T> = {
    * drift from causing hard validation crashes.
    */
   patchParsed?: (raw: unknown) => unknown;
+  /** Optional timeout in milliseconds for the API call (default: 120000). */
+  timeoutMs?: number;
 };
 
 function formatZodIssues(error: ZodError): string {
@@ -222,6 +225,11 @@ export async function generateStructuredData<T>(
 
   const startedAt = Date.now();
 
+  // Default timeout: 120 seconds (2 minutes)
+  const timeoutMs = params.timeoutMs ?? 120_000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const maxTokens =
       typeof params.maxTokens === "number" && Number.isFinite(params.maxTokens)
@@ -245,6 +253,7 @@ export async function generateStructuredData<T>(
       },
     );
 
+    clearTimeout(timeoutId);
     const latencyMs = Date.now() - startedAt;
 
     const content = completion.choices[0]?.message?.content;
@@ -317,7 +326,21 @@ export async function generateStructuredData<T>(
 
     return result.data;
   } catch (error) {
+    clearTimeout(timeoutId);
     const latencyMs = Date.now() - startedAt;
+
+    // Handle AbortError from timeout
+    if (error instanceof DOMException && error.name === "AbortError") {
+      const gatewayError = new AIGatewayError("TIMEOUT", `AI request timed out after ${timeoutMs}ms`, error);
+      logGatewayFailure({
+        operation: params.operation,
+        model,
+        latencyMs,
+        errorCode: gatewayError.code,
+        error: gatewayError,
+      });
+      throw gatewayError;
+    }
 
     if (error instanceof AIGatewayError) {
       if (error.code !== "PARSE_ERROR" && error.code !== "VALIDATION_ERROR") {

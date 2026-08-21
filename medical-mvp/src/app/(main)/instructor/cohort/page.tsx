@@ -3,10 +3,11 @@ import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { requireInstructor } from "@/lib/auth";
 import {
   getClassAnalytics,
-  WEAK_ACCURACY_THRESHOLD,
+  
   type CategoryPerformanceItem,
   type StudentRosterItem,
 } from "@/lib/cohort-actions";
+import { WEAK_ACCURACY_THRESHOLD } from "@/lib/cohort-constants";
 import { cn } from "@/lib/utils";
 
 function accuracyBarClass(accuracy: number): string {

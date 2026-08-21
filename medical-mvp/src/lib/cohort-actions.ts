@@ -6,8 +6,7 @@ import { requireInstructorApi } from "@/lib/auth";
 import { getLogger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { type ActionResult, withServerAction } from "@/lib/server-action";
-
-const WEAK_ACCURACY_THRESHOLD = 60;
+import { WEAK_ACCURACY_THRESHOLD } from "@/lib/cohort-constants";
 
 export type CategoryPerformanceItem = {
   categoryId: string;
@@ -245,5 +244,3 @@ export async function getClassAnalytics(): Promise<ClassAnalyticsResult> {
     },
   );
 }
-
-export { WEAK_ACCURACY_THRESHOLD };

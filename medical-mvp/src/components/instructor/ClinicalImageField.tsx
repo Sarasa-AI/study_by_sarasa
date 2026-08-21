@@ -2,7 +2,7 @@
 
 import { useRef, useState, type ChangeEvent } from "react";
 import Image from "next/image";
-import { ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { ImagePlus, Loader2, Trash2, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { uploadClinicalImage } from "@/lib/clinical-media-actions";
@@ -17,6 +17,7 @@ export function ClinicalImageField({ value, onChange, error }: ClinicalImageFiel
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -25,6 +26,7 @@ export function ClinicalImageField({ value, onChange, error }: ClinicalImageFiel
 
     setUploading(true);
     setUploadError(null);
+    setUploadSuccess(null);
 
     try {
       const formData = new FormData();
@@ -34,6 +36,7 @@ export function ClinicalImageField({ value, onChange, error }: ClinicalImageFiel
         setUploadError(result.message);
         return;
       }
+      setUploadSuccess(result.message);
       onChange(result.url);
     } catch {
       setUploadError("خطا در بارگذاری تصویر");
@@ -117,6 +120,12 @@ export function ClinicalImageField({ value, onChange, error }: ClinicalImageFiel
         />
       </div>
 
+      {uploadSuccess ? (
+        <p className="text-sm text-teal-600 flex items-center gap-1">
+          <CheckCircle2 className="h-4 w-4" />
+          {uploadSuccess}
+        </p>
+      ) : null}
       {uploadError ? <p className="text-sm text-red-600">{uploadError}</p> : null}
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
     </div>
