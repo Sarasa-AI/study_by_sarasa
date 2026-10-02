@@ -28,19 +28,20 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: { 
+        ...devices["Desktop Chrome"],
+        launchOptions: {
+          args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-software-rasterizer',
+            '--no-zygote',
+            '--single-process',
+          ],
+        },
+      },
     },
   ],
-
-  /**
-   * Start the Next.js dev server automatically before the test run.
-   * `reuseExistingServer: true` locally so you can keep `npm run dev`
-   * running in another terminal and skip the cold-start delay.
-   */
-  webServer: {
-    command: "npm run dev",
-    url: "http://localhost:3000",
-    reuseExistingServer: true,
-    timeout: 120_000,
-  },
 });
