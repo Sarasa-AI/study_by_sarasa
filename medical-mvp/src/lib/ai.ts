@@ -21,19 +21,28 @@ const JSON_ENFORCEMENT_SUFFIX =
 /** Default OpenRouter chat model when env vars are unset. */
 export const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini";
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-if (!OPENROUTER_API_KEY) {
-  throw new Error("OPENROUTER_API_KEY environment variable is required");
-}
+// Lazy client: do NOT throw at module load. Next.js collects route/page data at
+// build time; a top-level env check crashes Vercel builds when the key is unset
+// or when routes import this module transitively (e.g. weekly-digest-preview).
+let openrouterClient: OpenAI | null = null;
 
-const openrouter = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: OPENROUTER_API_KEY,
-  defaultHeaders: {
-    "HTTP-Referer": process.env.APP_BASE_URL ?? "http://localhost:3000",
-    "X-Title": "medical-mvp",
-  },
-});
+function getOpenRouterClient(): OpenAI {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY environment variable is required");
+  }
+  if (!openrouterClient) {
+    openrouterClient = new OpenAI({
+      baseURL: "https://openrouter.ai/api/v1",
+      apiKey,
+      defaultHeaders: {
+        "HTTP-Referer": process.env.APP_BASE_URL ?? "http://localhost:3000",
+        "X-Title": "medical-mvp",
+      },
+    });
+  }
+  return openrouterClient;
+}
 
 /** Resolve the OpenRouter model id for chat/completions requests. */
 export function resolveOpenRouterModel(explicit?: string): string {
@@ -238,7 +247,7 @@ export async function generateStructuredData<T>(
 
     const completion = await withRetry(
       () =>
-        openrouter.chat.completions.create({
+        getOpenRouterClient().chat.completions.create({
           model,
           messages: [
             { role: "system", content: buildSystemContent(params.systemInstruction) },

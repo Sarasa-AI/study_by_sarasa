@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "build:strict": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -31,6 +31,7 @@
     "@react-email/render": "^2.0.10",
     "@types/jest": "^30.0.0",
     "@types/supertest": "^7.2.0",
+    "@vercel/blob": "^2.8.0",
     "clsx": "^2.1.1",
     "jest": "^30.3.0",
     "lucide-react": "^0.441.0",

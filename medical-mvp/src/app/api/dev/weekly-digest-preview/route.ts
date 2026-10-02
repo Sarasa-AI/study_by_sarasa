@@ -5,6 +5,9 @@ import { sendEmail } from "@/lib/mail";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
+// Dev-only preview; never prerender. Avoids build-time evaluation of the AI stack.
+export const dynamic = "force-dynamic";
+
 function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
 }

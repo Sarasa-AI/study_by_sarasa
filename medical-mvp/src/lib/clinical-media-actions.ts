@@ -1,8 +1,7 @@
 "use server";
 
+import { put } from "@vercel/blob";
 import { randomUUID } from "crypto";
-import { mkdir, writeFile } from "fs/promises";
-import path from "path";
 import sharp from "sharp";
 import { requireInstructorApi } from "@/lib/auth";
 import { getLogger, logError } from "@/lib/logger";
@@ -18,8 +17,8 @@ export type UploadClinicalImageResult =
   | { success: false; message: string };
 
 /**
- * Saves a clinical image (EKG / X-Ray / rash) under public/uploads/cases
- * and returns a public URL path for Case.mediaUrl.
+ * Uploads a clinical image (EKG / X-Ray / rash) to Vercel Blob
+ * and returns the public Blob URL for Case.mediaUrl.
  */
 export async function uploadClinicalImage(formData: FormData): Promise<UploadClinicalImageResult> {
   const user = await requireInstructorApi();
@@ -45,8 +44,6 @@ export async function uploadClinicalImage(formData: FormData): Promise<UploadCli
         }
 
         const ext = file.type.includes("png") ? "png" : "jpg";
-        const filename = `${Date.now()}-${randomUUID()}.${ext}`;
-        const uploadsDir = path.join(process.cwd(), "public", "uploads", "cases");
         const inputBuffer = Buffer.from(await file.arrayBuffer());
         const image = sharp(inputBuffer, {
           failOn: "error",
@@ -95,13 +92,15 @@ export async function uploadClinicalImage(formData: FormData): Promise<UploadCli
           };
         }
 
-        await mkdir(uploadsDir, { recursive: true });
-        await writeFile(path.join(uploadsDir, filename), optimizedBuffer, { flag: "wx" });
+        const blob = await put(`cases/${randomUUID()}.${ext}`, optimizedBuffer, {
+          access: "public",
+          contentType: ext === "png" ? "image/png" : "image/jpeg",
+        });
 
         return {
           success: true,
           message: "تصویر بالینی با موفقیت بارگذاری شد",
-          url: `/uploads/cases/${filename}`,
+          url: blob.url,
         };
       } catch (error) {
         logError(getLogger(), {
